@@ -29,6 +29,8 @@ use VisitorIntelligence\GeoIP\GeoIpManager;
 use VisitorIntelligence\GeoIP\GeoIpUpdater;
 use VisitorIntelligence\Identity\VisitorCookie;
 use VisitorIntelligence\Identity\VisitorManager;
+use VisitorIntelligence\Integrations\GravityForms\GravityFormsIntegration;
+use VisitorIntelligence\Integrations\GravityForms\GravityFormsRepository;
 use VisitorIntelligence\Scheduler\CronManager;
 use VisitorIntelligence\Sessions\SessionManager;
 use VisitorIntelligence\Sessions\Sessionizer;
@@ -428,6 +430,12 @@ final class Plugin
         );
 
         $container->singleton(
+            GravityFormsRepository::class,
+            static fn (): GravityFormsRepository =>
+                new GravityFormsRepository()
+        );
+
+        $container->singleton(
             SourceDetectorInterface::class,
             static fn (): SourceDetectorInterface =>
                 new SourceDetector()
@@ -600,6 +608,22 @@ final class Plugin
                 return new VisitorController(
                     $container->get(
                         VisitorRepository::class
+                    )
+                );
+            }
+        );
+
+        $container->singleton(
+            GravityFormsIntegration::class,
+            static function (
+                Container $container
+            ): GravityFormsIntegration {
+                return new GravityFormsIntegration(
+                    $container->get(
+                        VisitorManager::class
+                    ),
+                    $container->get(
+                        GravityFormsRepository::class
                     )
                 );
             }
@@ -812,6 +836,13 @@ final class Plugin
             );
 
         $cron->register();
+
+        $gravityForms =
+            $this->container->get(
+                GravityFormsIntegration::class
+            );
+
+        $gravityForms->register();
     }
 
     private function registerRoutesAndMenu(): void
