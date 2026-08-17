@@ -1,26 +1,47 @@
-Итог проверки
+# TODO / CURRENT STATUS
 
-Репозиторий в целом сделан аккуратно и грамотно — на уровне выше среднего для WP-плагина: строгая типизация (declare(strict_types=1)), whitelisting идентификаторов в SQL, wpdb->prepare() везде, где нужно, капабилити-чек на админке, HttpOnly/Secure/SameSite-куки, валидация UUID/дат на входе в REST. Критических уязвимостей (SQLi, XSS, auth bypass) не нашёл. Но есть реальные, проверяемые проблемы:
+## Current phase
 
-1. Потенциальный баг в RateLimiter (реальный, не теоретический)
-includes/Collection/RateLimiter.php:132 — ключ транзиента строится как
+**Visitors + Gravity Forms integration: CLOSED**
 
-php
-'vi_rl_' . md5($ip, true)
+Baseline: `df06821`
 
-Флаг true даёт сырые бинарные байты md5-хэша, а не hex-строку. Этот ключ используется как option_name в таблице wp_options (транзиенты хранятся там), где колонка обычно varchar с utf8mb4-кодировкой. Сырые байты md5 не гарантированно валидны как UTF-8 — на строгих настройках MySQL/MariaDB (STRICT_TRANS_TABLES + sql_mode) это может приводить к молчаливому отказу записи или предупреждениям, что на практике отключает рейт-лимитер (транзиент не пишется → каждый запрос считается новым → check() всегда возвращает true). Исправление тривиальное: md5($ip) без true, либо bin2hex(md5($ip, true)).
+The current Visitors administration scope is considered complete and stable for the current phase.
 
-2. Незадокументированный флаг VI_TRUST_PROXIES
-Используется в том же файле (строка 145) для доверия X-Forwarded-For, но нигде не определяется и не упоминается ни в README, ни в specifications.txt. Без него за реверс-прокси/CDN (Cloudflare и т.п.) весь трафик будет считаться с одного IP — рейт-лимит сработает некорректно. Не баг, но пробел в документации, который стоит закрыть.
+## Closed
 
-3. Расхождение публичного API с собственной спецификацией
-specifications.txt (раздел 5.4) декларирует класс VisitorAPI с четырьмя методами: getVisitorSummary, getSessionContext, getPageStats, registerEvent. В includes/API/VisitorAPI.php реализованы только два — getSessionContext и getPageStats отсутствуют. Если какой-то внешний код (или будущий модуль) вызовет их по спецификации — фатальная ошибка "Call to undefined method". Плюс registerEvent() по спеке должен возвращать string (видимо, id события), по факту возвращает void и просто дёргает do_action — событие никак не попадает в пайплайн/БД.
+- [x] Visitor collection and visitor identity.
+- [x] Sessions and pageviews.
+- [x] Pageview URL inspection for an individual visitor.
+- [x] Server-side search.
+- [x] Server-side filters.
+- [x] Server-side sorting.
+- [x] Server-side pagination.
+- [x] Visitor details.
+- [x] Bot classification display.
+- [x] Horizontal table scrolling.
+- [x] CSV export action.
+- [x] Gravity Forms integration.
+- [x] Gravity Forms `vi_visitor_id` association.
+- [x] Gravity Forms submission count in Visitors.
+- [x] Sorting by Gravity Forms submission count.
+- [x] Gravity Forms submission count in Visitor Details.
+- [x] Coordinates removed from the main Visitors table.
 
-4. Спецификация сама себе противоречит (не баг кода, а огрех документа)
-Раздел 1.2 описывает режим tracking_mode = 'server_only', а JSON-схема в разделе 4.1 — enum: ["full", "limited"]. Код реализует server_only (следует прозе, не JSON-схеме) — то есть корректно, но specifications.txt не актуализирован после решения.
+## Deferred enhancements
 
-5. Все методы репозиториев (VisitorRepositoryInterface, SessionRepositoryInterface) переименованы и изменены по сигнатуре относительно спеки (find_by_uuid→findById, save→persist, другой набор методов вообще). Это, похоже, осознанный рефакторинг в процессе разработки — не проблема сама по себе, но specifications.txt помечен как «полностью законченный и зафиксированный», хотя явно не финальный.
+These are intentionally outside the closed current phase.
 
-Явных признаков галлюцинаций (несуществующих функций WP, придуманных hook-ов, фиктивных таблиц) не нашёл — GeoIP-модуль честно реализован как no-op-заглушка (PROVIDER = 'none'), без ложных claims о работающей геолокации.
+- [ ] Display all Gravity Forms submissions for a selected visitor, including form name, submitted time and submitted values.
+- [ ] Optimize Gravity Forms sorting fully at the database level for very large visitor volumes.
+- [ ] Move CSV generation to a dedicated server-side export endpoint.
+- [ ] Add dependent Country -> Region -> City filter behavior.
+- [ ] Add the GeoIP resolved/unresolved UI filter.
+- [ ] Revisit the specification requirement for a dedicated `vi_form_submissions` storage model versus using native Gravity Forms entries as the source of truth.
+- [ ] Future HubSpot integration.
 
-Что стоит поправить в первую очередь: пункт 1 (RateLimiter) — единственная находка, которая может реально сломать защиту от спама/DDoS на проде.
+## Notes
+
+The current phase is not blocked by the deferred items above. They are enhancement / architecture follow-up items.
+
+The previous audit items in this file are superseded by the current implementation status and should not be treated as an active blocker list.
