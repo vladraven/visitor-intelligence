@@ -578,9 +578,16 @@
                     </td>
 
                     <td>
-                        ${escapeHtml(
-                            visitor?.pageviews_count
-                        )}
+                        <button
+                            type="button"
+                            class="button-link vi-pageviews-link"
+                            data-visitor-id="${escapeHtml(visitorId)}"
+                            data-pageviews-count="${escapeHtml(visitor?.pageviews_count ?? 0)}"
+                        >
+                            ${escapeHtml(
+                                visitor?.pageviews_count
+                            )}
+                        </button>
                     </td>
 
                     <td>
@@ -1586,6 +1593,14 @@
                 </table>
             </div>
 
+            <div class="vi-card vi-pageviews-card">
+                <h3>Viewed Pages</h3>
+
+                <div id="vi-visitor-pageviews">
+                    <p>Loading page views...</p>
+                </div>
+            </div>
+
             <div class="vi-card">
                 <h3>Bot Detection</h3>
 
@@ -1619,6 +1634,160 @@
         });
     }
 
+    function getPageviewsUrl(
+        visitorId
+    ) {
+        return (
+            config.apiEndpoint
+            + '/'
+            + encodeURIComponent(
+                visitorId
+            )
+            + '/pageviews'
+        );
+    }
+
+    function renderPageviews(
+        pageviews,
+        count
+    ) {
+        const container =
+            document.getElementById(
+                'vi-visitor-pageviews'
+            );
+
+        if (!container) {
+            return;
+        }
+
+        if (
+            !Array.isArray(pageviews)
+            || pageviews.length === 0
+        ) {
+            container.innerHTML =
+                '<p>No recorded page views.</p>';
+
+            return;
+        }
+
+        const rows =
+            pageviews.map(
+                function (
+                    pageview,
+                    index
+                ) {
+                    const url =
+                        String(
+                            pageview?.url
+                            || ''
+                        ).trim();
+
+                    const occurredAt =
+                        pageview?.occurred_at
+                        || '';
+
+                    const sequence =
+                        pageview?.sequence_number
+                        ?? (index + 1);
+
+                    const safeUrl =
+                        escapeHtml(
+                            url
+                        );
+
+                    const link =
+                        url !== ''
+                            ? '<a href="'
+                                + safeUrl
+                                + '" target="_blank" rel="noopener noreferrer">'
+                                + safeUrl
+                                + '</a>'
+                            : (
+                                config.strings?.notAvailable
+                                || 'N/A'
+                            );
+
+                    return `
+                        <tr>
+                            <td>${escapeHtml(occurredAt)}</td>
+                            <td>${link}</td>
+                            <td>${escapeHtml(sequence)}</td>
+                        </tr>
+                    `;
+                }
+            ).join('');
+
+        container.innerHTML = `
+            <p>
+                <strong>${escapeHtml(
+                    count ?? pageviews.length
+                )}</strong>
+                page views
+            </p>
+
+            <div
+                class="vi-pageviews-table-wrap"
+                style="overflow-x:auto;"
+            >
+                <table class="widefat striped">
+                    <thead>
+                        <tr>
+                            <th>Viewed At</th>
+                            <th>URL</th>
+                            <th>#</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        ${rows}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    async function loadPageviews(
+        visitorId,
+        expectedCount = 0
+    ) {
+        const container =
+            document.getElementById(
+                'vi-visitor-pageviews'
+            );
+
+        if (container) {
+            container.innerHTML =
+                '<p>Loading page views...</p>';
+        }
+
+        try {
+            const payload =
+                await request(
+                    getPageviewsUrl(
+                        visitorId
+                    )
+                );
+
+            renderPageviews(
+                payload?.pageviews,
+                payload?.count
+                ?? expectedCount
+            );
+        } catch (
+            error
+        ) {
+            if (container) {
+                container.innerHTML =
+                    '<p>'
+                    + escapeHtml(
+                        error?.message
+                        || 'Unable to load page views.'
+                    )
+                    + '</p>';
+            }
+        }
+    }
+
     async function loadVisitor(
         visitorId
     ) {
@@ -1648,6 +1817,14 @@
 
             renderDetails(
                 payload.visitor
+            );
+
+            loadPageviews(
+                visitorId,
+                Number(
+                    payload.visitor?.pageviews_count
+                    || 0
+                )
             );
         } catch (
             error
@@ -1810,6 +1987,27 @@
             elements.tableBody.addEventListener(
                 'click',
                 function (event) {
+                    const pageviewsButton =
+                        event.target.closest(
+                            '.vi-pageviews-link'
+                        );
+
+                    if (pageviewsButton) {
+                        const visitorId =
+                            pageviewsButton.dataset.visitorId
+                            || '';
+
+                        if (!visitorId) {
+                            return;
+                        }
+
+                        loadVisitor(
+                            visitorId
+                        );
+
+                        return;
+                    }
+
                     const button =
                         event.target.closest(
                             '.vi-visitor-link'
@@ -1863,10 +2061,15 @@
         }
 
         return String(value)
-            .replaceAll('"', '""');
+            .replaceAll(
+                '"',
+                '""'
+            );
     }
 
-    function getExportRows(visitors) {
+    function getExportRows(
+        visitors
+    ) {
         return visitors.map(
             function (visitor) {
                 return [
@@ -1894,7 +2097,9 @@
         );
     }
 
-    function createCsv(visitors) {
+    function createCsv(
+        visitors
+    ) {
         const header = [
             'ID',
             'Visitor ID',
@@ -1915,7 +2120,9 @@
 
         const rows = [
             header,
-            ...getExportRows(visitors),
+            ...getExportRows(
+                visitors
+            ),
         ];
 
         return rows
@@ -1924,9 +2131,9 @@
                     return row
                         .map(
                             function (value) {
-                                return '"' +
-                                    csvValue(value) +
-                                    '"';
+                                return '"'
+                                    + csvValue(value)
+                                    + '"';
                             }
                         )
                         .join(',');
@@ -1939,23 +2146,29 @@
         csv,
         filename
     ) {
-        const blob = new Blob(
-            [
-                '\uFEFF' + csv,
-            ],
-            {
-                type:
-                    'text/csv;charset=utf-8;',
-            }
-        );
+        const blob =
+            new Blob(
+                [
+                    '\uFEFF' + csv,
+                ],
+                {
+                    type:
+                        'text/csv;charset=utf-8;',
+                }
+            );
 
         const url =
-            URL.createObjectURL(blob);
+            URL.createObjectURL(
+                blob
+            );
 
         const link =
-            document.createElement('a');
+            document.createElement(
+                'a'
+            );
 
-        link.href = url;
+        link.href =
+            url;
 
         link.download =
             filename;
@@ -1992,8 +2205,11 @@
             );
 
         if (button) {
-            button.disabled = true;
-            button.textContent = 'Exporting...';
+            button.disabled =
+                true;
+
+            button.textContent =
+                'Exporting...';
         }
 
         const originalPage =
@@ -2003,32 +2219,41 @@
             state.perPage;
 
         try {
-            state.page = 1;
-            state.perPage = 50;
+            state.page =
+                1;
 
-            const allVisitors = [];
+            state.perPage =
+                50;
 
-            let totalPages = 1;
+            const allVisitors =
+                [];
 
-            while (state.page <= totalPages) {
+            let totalPages =
+                1;
+
+            do {
                 const url =
                     getVisitorsUrl();
 
                 const payload =
-                    await request(url);
+                    await request(
+                        url
+                    );
 
                 const visitors =
-                    Array.isArray(payload?.items)
+                    Array.isArray(
+                        payload?.items
+                    )
                         ? payload.items
-                        : Array.isArray(payload?.data)
+                        : Array.isArray(
+                            payload?.data
+                        )
                             ? payload.data
-                            : Array.isArray(payload?.visitors)
+                            : Array.isArray(
+                                payload?.visitors
+                            )
                                 ? payload.visitors
                                 : [];
-
-                if (visitors.length === 0) {
-                    break;
-                }
 
                 allVisitors.push(
                     ...visitors
@@ -2041,12 +2266,17 @@
                         ?? 1
                     );
 
-                if (state.page >= totalPages) {
+                if (
+                    visitors.length === 0
+                    || state.page >= totalPages
+                ) {
                     break;
                 }
 
-                state.page += 1;
-            }
+                state.page +=
+                    1;
+
+            } while (true);
 
             if (
                 allVisitors.length === 0
@@ -2081,12 +2311,14 @@
 
             downloadCsv(
                 csv,
-                'visitor-intelligence-visitors-' +
-                    timestamp +
-                    '.csv'
+                'visitor-intelligence-visitors-'
+                + timestamp
+                + '.csv'
             );
 
-        } catch (error) {
+        } catch (
+            error
+        ) {
             showStatus(
                 error?.message
                 || 'Unable to export visitors.',
@@ -2094,12 +2326,18 @@
             );
 
         } finally {
-            state.page = originalPage;
-            state.perPage = originalPerPage;
+            state.page =
+                originalPage;
+
+            state.perPage =
+                originalPerPage;
 
             if (button) {
-                button.disabled = false;
-                button.textContent = 'Export CSV';
+                button.disabled =
+                    false;
+
+                button.textContent =
+                    'Export CSV';
             }
         }
     }

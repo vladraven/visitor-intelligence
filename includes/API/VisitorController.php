@@ -424,6 +424,64 @@ final class VisitorController
 
         register_rest_route(
             'vi/v1',
+            '/visitors/(?P<visitor_id>[A-Za-z0-9_-]+)/pageviews',
+            [
+                'methods' =>
+                    'GET',
+
+                'callback' =>
+                    [
+                        $this,
+                        'getVisitorPageviews',
+                    ],
+
+                'permission_callback' =>
+                    [
+                        $this,
+                        'canViewVisitors',
+                    ],
+
+                'args' =>
+                    [
+                        'visitor_id' =>
+                            [
+                                'required' =>
+                                    true,
+
+                                'sanitize_callback' =>
+                                    static function (
+                                        mixed $value
+                                    ): string {
+                                        return trim(
+                                            (string) $value
+                                        );
+                                    },
+
+                                'validate_callback' =>
+                                    static function (
+                                        mixed $value
+                                    ): bool {
+                                        if (
+                                            !is_string($value)
+                                            && !is_numeric($value)
+                                        ) {
+                                            return false;
+                                        }
+
+                                        return preg_match(
+                                            '/^[A-Za-z0-9_-]+$/',
+                                            trim(
+                                                (string) $value
+                                            )
+                                        ) === 1;
+                                    },
+                            ],
+                    ],
+            ]
+        );
+
+        register_rest_route(
+            'vi/v1',
             '/visitors/(?P<visitor_id>[A-Za-z0-9_-]+)',
             [
                 'methods' =>
@@ -659,6 +717,209 @@ final class VisitorController
             return new WP_Error(
                 'vi_visitors_filters_unavailable',
                 'Unable to load visitor filter options.',
+                [
+                    'status' =>
+                        500,
+                ]
+            );
+        }
+    }
+
+    public function getVisitorPageviews(
+        WP_REST_Request $request
+    ): WP_REST_Response|WP_Error {
+        $visitorId =
+            trim(
+                (string) (
+                    $request->get_param(
+                        'visitor_id'
+                    )
+                    ?? ''
+                )
+            );
+
+        if (
+            $visitorId === ''
+        ) {
+            return new WP_Error(
+                'vi_invalid_visitor_id',
+                'Visitor ID is required.',
+                [
+                    'status' =>
+                        400,
+                ]
+            );
+        }
+
+        if (
+            preg_match(
+                '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
+                $visitorId
+            ) !== 1
+        ) {
+            return new WP_Error(
+                'vi_invalid_visitor_id',
+                'Visitor ID must be a valid UUID.',
+                [
+                    'status' =>
+                        400,
+                ]
+            );
+        }
+
+        try {
+            $visitor =
+                $this->repository->findById(
+                    $visitorId
+                );
+
+            if (
+                $visitor === null
+            ) {
+                return new WP_Error(
+                    'vi_visitor_not_found',
+                    'Visitor not found.',
+                    [
+                        'status' =>
+                            404,
+                    ]
+                );
+            }
+
+            global $wpdb;
+
+            if (
+                !$wpdb instanceof \wpdb
+            ) {
+                throw new \RuntimeException(
+                    'WordPress database object is not available.'
+                );
+            }
+
+            $table =
+                $wpdb->prefix
+                . 'vi_pageviews';
+
+            $sql =
+                "SELECT
+                    pageview_id,
+                    occurred_at,
+                    url,
+                    sequence_number
+                 FROM {$table}
+                 WHERE visitor_id = %s
+                 ORDER BY occurred_at ASC, sequence_number ASC
+                 LIMIT 1000";
+
+            $prepared =
+                $wpdb->prepare(
+                    $sql,
+                    $visitorId
+                );
+
+            if (
+                !is_string($prepared)
+            ) {
+                throw new \RuntimeException(
+                    'Unable to prepare pageviews query.'
+                );
+            }
+
+            $pageviews =
+                $wpdb->get_results(
+                    $prepared,
+                    ARRAY_A
+                );
+
+            if (
+                $pageviews === null
+            ) {
+                $error =
+                    trim(
+                        (string) $wpdb->last_error
+                    );
+
+                throw new \RuntimeException(
+                    $error !== ''
+                        ? $error
+                        : 'Unable to query visitor pageviews.'
+                );
+            }
+
+            $items = [];
+
+            foreach (
+                $pageviews as $pageview
+            ) {
+                if (
+                    !is_array($pageview)
+                ) {
+                    continue;
+                }
+
+                $items[] = [
+                    'pageview_id' =>
+                        (string) (
+                            $pageview['pageview_id']
+                            ?? ''
+                        ),
+
+                    'occurred_at' =>
+                        (string) (
+                            $pageview['occurred_at']
+                            ?? ''
+                        ),
+
+                    'url' =>
+                        (string) (
+                            $pageview['url']
+                            ?? ''
+                        ),
+
+                    'sequence_number' =>
+                        isset(
+                            $pageview[
+                                'sequence_number'
+                            ]
+                        )
+                            ? (int) $pageview[
+                                'sequence_number'
+                            ]
+                            : null,
+                ];
+            }
+
+            return new WP_REST_Response(
+                [
+                    'visitor_id' =>
+                        $visitorId,
+
+                    'count' =>
+                        count($items),
+
+                    'pageviews' =>
+                        $items,
+                ],
+                200
+            );
+        } catch (
+            \Throwable $exception
+        ) {
+            do_action(
+                'vi_visitors_error',
+                $exception,
+                [
+                    'action' =>
+                        'pageviews',
+
+                    'visitor_id' =>
+                        $visitorId,
+                ]
+            );
+
+            return new WP_Error(
+                'vi_visitor_pageviews_unavailable',
+                'Unable to load visitor pageviews.',
                 [
                     'status' =>
                         500,
