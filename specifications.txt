@@ -1,0 +1,997 @@
+TECHNICAL GAP ANALYSIS & MASTER SPECIFICATION v1.2
+VISITOR INTELLIGENCE for WordPress
+1. Server + Browser Reconciliation Model (Источник истины)
+1.1. Концепция гибридного сбора
+Для обеспечения точной аналитики при любых условиях (включая работу AdBlockers, отключенный JavaScript и фоновые вкладки) устанавливаются следующие роли компонентов:
+Server (Request Collector): Первичный источник истины для факт-регистрации визита, первичного источника трафика (HTTP Referer), GeoIP, базовых бот-сигналов и серверной идентификации.
+Browser (Client Collector): Первичный источник истины для поведенческих метрик: Active Time, page_visibility, взаимодействия, порядка переходов внутри одностраничных приложений (SPA) и уточненных бот-сигналов (JS-execution, Canvas, DOM).
+Plaintext
+              CLIENT REQUEST
+                     │
+         ┌───────────┴───────────┐
+         ▼                       ▼
+   SERVER ENGINE          BROWSER ENGINE
+  (Http / Referer /      (Visibility / Active Time /
+   GeoIP / Headers)       Heartbeat / Navigation)
+         │                       │
+         └───────────┬───────────┘
+                     ▼
+            RECONCILIATION LAYER
+            (Merge / Deduplicate)
+                     ▼
+           CANONICAL TELEMETRY
+
+1.2. Правила объединения (Reconciliation Rules)
+Создание Session: Сессия может быть инициализирована серверным запросом (Server-First) или браузерным событием (Browser-First).
+AdBlocker / No-JS Mode: Если Browser Collector заблокирован, сессия сохраняется со статусом tracking_mode = 'server_only'. В этом случае active_seconds устанавливается в 0, а длительность сессии рассчитывается по таймстампам серверных запросов.
+Двухфазное обогащение (Enrichment):
+При серверном запросе формируется черновик записи в vi_pageviews (или кэшируется в transient/памяти при REST-сборе).
+При поступлении пакета событий от Browser Collector данные связываются по единым pageview_id и session_id.
+Значения метрик из Browser Collector (active_seconds, visible_seconds) перезаписывают серверные оценки, так как обладают более высокой точностью.
+2. Детальная физическая схема базы данных
+Все таблицы создаются в кодировке utf8mb4 с ENGINE=InnoDB и динамическим форматом строк (ROW_FORMAT=DYNAMIC). Префикс определяется через $wpdb->prefix.
+2.1. Таблица {prefix}vi_visitors
+SQL
+CREATE TABLE `{prefix}vi_visitors` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `visitor_id` CHAR(36) NOT NULL,
+  `first_seen` DATETIME NOT NULL,
+  `last_seen` DATETIME NOT NULL,
+  `sessions_count` INT UNSIGNED NOT NULL DEFAULT 1,
+  `pageviews_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `active_seconds` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `country_code` CHAR(2) DEFAULT NULL,
+  `region_code` VARCHAR(16) DEFAULT NULL,
+  `city` VARCHAR(128) DEFAULT NULL,
+  `device_type` VARCHAR(32) DEFAULT NULL,
+  `browser` VARCHAR(64) DEFAULT NULL,
+  `browser_version` VARCHAR(32) DEFAULT NULL,
+  `os` VARCHAR(64) DEFAULT NULL,
+  `os_version` VARCHAR(32) DEFAULT NULL,
+  `bot_score` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  `bot_classification` VARCHAR(16) NOT NULL DEFAULT 'unknown',
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_visitor_id` (`visitor_id`),
+  KEY `idx_last_seen` (`last_seen`),
+  KEY `idx_first_seen` (`first_seen`),
+  KEY `idx_geo` (`country_code`, `region_code`),
+  KEY `idx_bot` (`bot_classification`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+2.2. Таблица {prefix}vi_sessions
+SQL
+CREATE TABLE `{prefix}vi_sessions` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `session_id` CHAR(36) NOT NULL,
+  `visitor_id` CHAR(36) NOT NULL,
+  `started_at` DATETIME NOT NULL,
+  `last_activity_at` DATETIME NOT NULL,
+  `ended_at` DATETIME DEFAULT NULL,
+  `duration_seconds` INT UNSIGNED NOT NULL DEFAULT 0,
+  `active_seconds` INT UNSIGNED NOT NULL DEFAULT 0,
+  `landing_page_id` BIGINT UNSIGNED DEFAULT NULL,
+  `landing_url` TEXT NOT NULL,
+  `exit_page_id` BIGINT UNSIGNED DEFAULT NULL,
+  `exit_url` TEXT DEFAULT NULL,
+  `source_type` VARCHAR(32) NOT NULL DEFAULT 'unknown',
+  `source_name` VARCHAR(128) DEFAULT NULL,
+  `source_domain` VARCHAR(255) DEFAULT NULL,
+  `referrer_url` TEXT DEFAULT NULL,
+  `country_code` CHAR(2) DEFAULT NULL,
+  `region_code` VARCHAR(16) DEFAULT NULL,
+  `city` VARCHAR(128) DEFAULT NULL,
+  `device_type` VARCHAR(32) DEFAULT NULL,
+  `browser` VARCHAR(64) DEFAULT NULL,
+  `os` VARCHAR(64) DEFAULT NULL,
+  `bot_score` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  `bot_classification` VARCHAR(16) NOT NULL DEFAULT 'unknown',
+  `tracking_mode` VARCHAR(16) NOT NULL DEFAULT 'full',
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_session_id` (`session_id`),
+  KEY `idx_visitor_id` (`visitor_id`),
+  KEY `idx_started_at` (`started_at`),
+  KEY `idx_last_activity` (`last_activity_at`),
+  KEY `idx_source` (`source_type`, `source_name`(32)),
+  KEY `idx_geo` (`country_code`, `region_code`),
+  KEY `idx_bot` (`bot_classification`),
+  KEY `idx_composite_lookup` (`visitor_id`, `started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+2.3. Таблица {prefix}vi_pageviews
+SQL
+CREATE TABLE `{prefix}vi_pageviews` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `pageview_id` CHAR(36) NOT NULL,
+  `visitor_id` CHAR(36) NOT NULL,
+  `session_id` CHAR(36) NOT NULL,
+  `occurred_at` DATETIME NOT NULL,
+  `url` TEXT NOT NULL,
+  `url_hash` CHAR(64) NOT NULL,
+  `post_id` BIGINT UNSIGNED DEFAULT NULL,
+  `previous_url` TEXT DEFAULT NULL,
+  `referrer_url` TEXT DEFAULT NULL,
+  `sequence_number` INT UNSIGNED NOT NULL DEFAULT 1,
+  `active_seconds` INT UNSIGNED NOT NULL DEFAULT 0,
+  `visible_seconds` INT UNSIGNED NOT NULL DEFAULT 0,
+  `is_landing` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_exit` TINYINT(1) NOT NULL DEFAULT 0,
+  `bot_score` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  `bot_classification` VARCHAR(16) NOT NULL DEFAULT 'unknown',
+  `created_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_pageview_id` (`pageview_id`),
+  KEY `idx_visitor` (`visitor_id`),
+  KEY `idx_session` (`session_id`),
+  KEY `idx_occurred_at` (`occurred_at`),
+  KEY `idx_post_id` (`post_id`),
+  KEY `idx_url_hash` (`url_hash`),
+  KEY `idx_session_seq` (`session_id`, `sequence_number`),
+  KEY `idx_post_time` (`post_id`, `occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+2.4. Таблица {prefix}vi_events
+SQL
+CREATE TABLE `{prefix}vi_events` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `event_id` CHAR(36) NOT NULL,
+  `visitor_id` CHAR(36) NOT NULL,
+  `session_id` CHAR(36) NOT NULL,
+  `pageview_id` CHAR(36) DEFAULT NULL,
+  `event_type` VARCHAR(64) NOT NULL,
+  `schema_version` VARCHAR(8) NOT NULL DEFAULT 'v1',
+  `occurred_at` DATETIME NOT NULL,
+  `payload` LONGTEXT DEFAULT NULL,
+  `created_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_event_id` (`event_id`),
+  KEY `idx_visitor` (`visitor_id`),
+  KEY `idx_session` (`session_id`),
+  KEY `idx_pageview` (`pageview_id`),
+  KEY `idx_type` (`event_type`),
+  KEY `idx_occurred` (`occurred_at`),
+  KEY `idx_composite_event` (`session_id`, `occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+2.5. Таблица {prefix}vi_daily_stats (Физическая схема агрегатов)
+SQL
+CREATE TABLE `{prefix}vi_daily_stats` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `date_key` DATE NOT NULL,
+  `dimension_type` VARCHAR(32) NOT NULL, 
+  `dimension_value` VARCHAR(255) NOT NULL DEFAULT 'total',
+  `visitors_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `sessions_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `pageviews_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `active_seconds_total` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `bounces_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `entries_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `exits_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_date_dimension` (`date_key`, `dimension_type`, `dimension_value`(191)),
+  KEY `idx_date` (`date_key`),
+  KEY `idx_dimension` (`dimension_type`, `dimension_value`(64))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+Допустимые значения dimension_type: overview, page, source, country, region, device, browser, os.
+3. Алгоритмы и правила бизнес-логики
+3.1. Active Time Algorithm
+Рассчитывается на основе событий page_visible, page_hidden, heartbeat и page_leave.
+Plaintext
+                    VISIBILITY STATE
+                 ┌──────────────────────┐
+                 ▼                      │
+        [ page_visible ]                │
+                 │                      │
+                 ▼                      │
+        Start Active Timer              │
+                 │                      │
+                 ├──────► [ heartbeat ] (Validate delta <= 15s)
+                 │                      │
+                 ▼                      │
+         [ page_hidden / page_leave ] ──┘
+                 │
+                 ▼
+        Stop Active Timer -> Add Delta to Active Seconds
+
+При событии page_visible запускается локальный счетчик времени.
+Каждые 10 секунд клиент отправляет heartbeat. Сервер вычисляет дельту между последним валидным heartbeat или page_visible.
+Максимально допустимая интервальная дельта без подтверждения активности составляет 15 секунд. Если задержка между сигналами превышает 15 секунд, начисление active_seconds за этот интервал замораживается на отметке 10 секунд.
+Фоновые вкладки (document.hidden === true) полностью блокируют отправку heartbeat и начисление active_seconds.
+3.2. Bot Scoring Rules (0–100)
+Каждый запрос проходит через алгоритм скоринга:
+Сигнал / Проверка
+Изменение Bot Score
+Примечание
+Известная подпись из базы Known Bot User-Agents
++100
+Классификация: bot
+Отсутствие заголовок Accept-Language или Accept
++30
+Подозрительный клиент
+Превышение порога частоты запросов (> 30 запросов / 10 сек по IP)
++40
+Всплеск активности
+Отсутствие выполнения JavaScript (не пришли события Browser Collector за 30 сек)
++20
+Возможен headless-парсер
+Наличие флагов Headless (например, navigator.webdriver === true)
++80
+Автоматизированный браузер
+Поведенческие аномалии (переход между страницами < 200 мс)
++35
+Нечеловеческая скорость
+
+Градация итогового статуса (bot_classification):
+0 – 19: human
+20 – 59: suspicious
+60 – 100: bot
+Недостаточно данных: unknown
+3.3. Source Attribution Algorithm
+Определение источника сессии выполняется в следующем порядке приоритета:
+Plaintext
+1. Paid Ads Check (UTM / GCLID / FBCLID)
+       │ (NotFound)
+       ▼
+2. Search Engines Match (Referer Host)
+       │ (NotFound)
+       ▼
+3. Social Networks Match (Referer Host)
+       │ (NotFound)
+       ▼
+4. Email Clients / Webmail (Referer / UTM)
+       │ (NotFound)
+       ▼
+5. External Referral (Referer Host != Current Host)
+       │ (NotFound)
+       ▼
+6. Direct (Referer is Empty)
+
+Advertising: Наличие gclid, fbclid, msclkid или utm_medium matching /(cpc|ppc|paid|ads)/i.
+Organic Search: HTTP Referer соответствует известным поисковикам (google.*, bing.com, duckduckgo.com, yandex.* и др.) без рекламных меток.
+Social: HTTP Referer соответствует социальным сетям (facebook.com, t.co, instagram.com, linkedin.com и др.).
+Email: utm_medium matching /(email|newsletter)/i или referer из известной webmail-системы.
+Referral: Домен HTTP Referer существует и не совпадает с текущим доменным именем сайта.
+Direct: HTTP Referer отсутствует.
+3.4. Consent State Machine
+Управление состоянием согласия пользователя на стороне клиента:
+Plaintext
+                [ State: UNKNOWN ]
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+    ViConsent.grant()             ViConsent.revoke()
+          │                             │
+          ▼                             ▼
+  [ State: GRANTED ]             [ State: DENIED ]
+  • Enable Collectors            • Flush Queue
+  • Process Queue                • Clear Storage
+  • Set Cookie                   • Stop Tracking
+
+UNKNOWN: Сбор временно буферизуется в localStorage (до 50 событий) до получения решения пользователя.
+GRANTED: Включается Browser Collector, накопленная буферизированная очередь отправляется на сервер.
+DENIED: Буфер очищается, куки vi_visitor_id удаляются, дальнейшие события не генерируются.
+4. REST API Schemas & Contracts
+4.1. Telemetry Collector Schema
+URL: /wp-json/vi/v1/collect
+Method: POST
+Headers: Content-Type: application/json
+Request Body JSON Schema:
+JSON
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["visitor_id", "session_id", "events"],
+  "properties": {
+    "visitor_id": { "type": "string", "format": "uuid" },
+    "session_id": { "type": "string", "format": "uuid" },
+    "tracking_mode": { "type": "string", "enum": ["full", "limited"] },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": ["event_id", "event_type", "timestamp"],
+        "properties": {
+          "event_id": { "type": "string", "format": "uuid" },
+          "pageview_id": { "type": "string", "format": "uuid" },
+          "event_type": { "type": "string", "maxLength": 64 },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "url": { "type": "string", "maxLength": 2083 },
+          "referrer": { "type": "string", "maxLength": 2083 },
+          "payload": { "type": "object" }
+        }
+      }
+    }
+  }
+}
+
+Response Schema:
+HTTP 200 OK:
+JSON
+{
+  "status": "success",
+  "processed": 3,
+  "failed": 0,
+  "server_time": "2026-08-10T15:30:00Z"
+}
+
+
+
+
+HTTP 429 Too Many Requests:
+JSON
+{
+  "code": "vi_rate_limit_exceeded",
+  "message": "Too many requests. Limit exceeded.",
+  "data": { "status": 429, "retry_after": 60 }
+}
+
+
+
+
+5. Инфраструктурные контракты
+5.1. Rate-Limit Algorithm
+Защита REST Collector осуществляется через механизм Leaky Bucket / Token Bucket с использованием Transient API или Redis (при наличии Object Cache):
+Лимит: Максимум 120 запросов в минуту с одного IP-адреса.
+Батчинг: До 50 событий в рамках одного HTTP POST запроса.
+При превышении порога возвращается HTTP статус 429 с заголовком Retry-After: 60. Логирование заблокированных запросов в телеметрию не производится.
+5.2. Migration System Contract
+Класс миграций обязана реализовывать MigrationInterface:
+PHP
+namespace VisitorIntelligence\Core\Database;
+
+interface MigrationInterface {
+    public function get_version(): string;
+    public function up(): void;
+    public function down(): void;
+}
+
+Версия базы данных фиксируется в wp_options под ключом vi_db_version. Все изменения структуры выполняются атомарно в рамках версионированных классов миграций (Migration_001_Initial, Migration_002_AddDailyStats и т.д.).
+5.3. Repositories Contracts
+PHP
+namespace VisitorIntelligence\Core\Contracts;
+
+interface VisitorRepositoryInterface {
+    public function find_by_uuid(string $visitor_id): ?array;
+    public function save(array $data): bool;
+    public function increment_counters(string $visitor_id, int $views_add, int $active_sec_add): void;
+}
+
+interface SessionRepositoryInterface {
+    public function find_by_uuid(string $session_id): ?array;
+    public function save(array $data): bool;
+    public function update_activity(string $session_id, string $last_activity, int $active_sec_add): void;
+}
+
+5.4. Public PHP API Contracts
+Главная точка взаимодействия для внешних плагинов и модулей расширения:
+PHP
+namespace VisitorIntelligence\API;
+
+class VisitorAPI {
+    public static function getVisitorSummary(string $visitor_id): array;
+    public static function getSessionContext(string $session_id): array;
+    public static function getPageStats(int $post_id, array $args = []): array;
+    public static function registerEvent(array $event_data): string;
+}
+
+6. Порядок реализации (Implementation Roadmap)
+С этого момента спецификация считается полностью законченной и зафиксированной. Разработка плагина начинается строго в следующей последовательности:
+Plaintext
+Step 01: Plugin Bootstrap & Autoloader
+Step 02: Core Contracts & Service Container
+Step 03: Database Migrations (Schema Execution)
+Step 04: Base Storage Repositories
+Step 05: Identity & Visitor Managers
+Step 06: Session Manager & Sessionizer Engine
+Step 07: REST Collector & Rate Limiter
+Step 08: Client-Side Browser Collector (JS Engine)
+Step 09: Event Processing Pipeline
+Step 10: GeoIP & Bot Detection Engines
+Step 11: Daily Aggregator & Scheduler
+Step 12: Public API & WP Action/Filter Hooks
+Step 13: Admin Dashboard UI
+7. VISITOR ADMINISTRATION & DATA EXPLORATION
+============================================
+
+The WordPress administration interface MUST provide a dedicated
+Visitors view for inspecting the canonical visitor records stored in
+{prefix}vi_visitors.
+
+The administration interface is a presentation and operational layer.
+It MUST NOT change the canonical visitor data model merely to make the
+table easier to read.
+
+7.1. Main Visitors Table
+------------------------
+
+The main Visitors table MUST be optimised for quick human inspection.
+
+The required visible columns are:
+
+- ID
+- Country
+- Province / Region
+- City
+- Device
+- Browser
+- Browser Version
+- OS
+- OS Version
+- First Seen
+- Last Seen
+- Sessions
+- Pageviews
+- Active Time
+- Bot / Bot Classification
+
+The following fields MUST NOT be displayed as normal columns in the
+main table:
+
+- created_at
+- updated_at
+- geo_source
+- geo_database_version
+- latitude
+- longitude
+- country_code
+- region_code
+
+These fields MUST remain available in the underlying data where
+specified by the database schema and MAY be displayed in Visitor
+Details or included in technical exports when appropriate.
+
+The main table MUST NOT contain:
+
+- first_name
+- last_name
+- email
+- phone
+
+The system MUST NOT attempt to infer a person's name or contact
+information from anonymous visitor data.
+
+7.2. Server-Side Search
+-----------------------
+
+The Visitors interface MUST support server-side search.
+
+Search MUST NOT require loading the complete visitor dataset into the
+browser.
+
+Search MUST work together with filtering, sorting, pagination and
+export.
+
+7.3. Server-Side Filtering
+--------------------------
+
+The Visitors interface MUST support filtering by:
+
+- visitor ID
+- bot classification / visitor type
+- country
+- province / region
+- city
+- device type
+- browser
+- operating system
+- first_seen date/time
+- last_seen date/time
+- GeoIP resolved / unresolved
+
+Where practical, Country, Province / Region and City selectors SHOULD
+be dependent.
+
+Example:
+
+Country = Canada
+Province = Manitoba
+City = Winnipeg
+
+The Province selector SHOULD be restricted by Country.
+
+The City selector SHOULD be restricted by Country and Province.
+
+Filtering MUST be executed by the repository/database layer.
+
+7.4. Sorting
+------------
+
+The Visitors interface MUST support server-side sorting.
+
+Supported sorting fields SHOULD include:
+
+- ID
+- first_seen
+- last_seen
+- sessions_count
+- pageviews_count
+- active_seconds
+- country
+- region
+- city
+- device_type
+- browser
+- browser_version
+- os
+- os_version
+- bot_score
+- bot_classification
+
+Sorting MUST support:
+
+- ASC
+- DESC
+
+Sort fields MUST be validated against an explicit whitelist.
+
+User-supplied sort field names MUST NEVER be inserted directly into SQL.
+
+7.5. Pagination
+---------------
+
+The Visitors interface MUST use server-side pagination.
+
+The API MUST return sufficient metadata to render pagination:
+
+- items
+- total
+- page
+- per_page
+- total_pages
+
+The browser MUST NOT retrieve the complete visitor dataset simply to
+render the Visitors page.
+
+The implementation MUST remain usable when the number of visitors
+becomes very large.
+
+7.6. Horizontal Scrolling
+-------------------------
+
+The Visitors table MAY be wider than the browser viewport.
+
+A horizontal scrollbar MUST be available at the top of the table.
+
+The top horizontal scrollbar MUST remain synchronised with the actual
+table horizontal scroll position.
+
+The administrator MUST NOT have to scroll to the bottom of a large
+table merely to move horizontally.
+
+7.7. Export
+-----------
+
+The Visitors interface MUST provide an Export action.
+
+The initial required format is CSV.
+
+The export MUST execute server-side.
+
+The export MUST respect the currently active:
+
+- search
+- filters
+- date range
+- sort selection where applicable
+
+Example:
+
+Country = Canada
+Province = Manitoba
+Bot Classification = human
+Date range = selected period
+
+The exported dataset MUST correspond to the active query.
+
+The browser MUST NOT be required to load every matching visitor before
+the server generates the CSV.
+
+The normal user-facing export SHOULD prioritise readable business
+fields.
+
+Technical fields MUST NOT be required merely because they exist in the
+database.
+
+7.8. Visitor Details
+--------------------
+
+Selecting a visitor MUST allow the administrator to inspect details
+not shown in the main table.
+
+Visitor Details SHOULD include:
+
+Identity:
+- visitor_id
+- first_seen
+- last_seen
+
+Activity:
+- sessions_count
+- pageviews_count
+- active_seconds
+
+GeoIP:
+- country_code
+- country_name where available
+- region_code
+- region_name where available
+- city
+- latitude
+- longitude
+- geo_source
+- geo_database_version
+
+Technology:
+- device_type
+- browser
+- browser_version
+- os
+- os_version
+
+Bot:
+- bot_score
+- bot_classification
+
+Associated form submissions MUST also be displayed when present.
+
+7.9. Visitor Identity and Form Data
+-----------------------------------
+
+The system MUST NOT attempt to determine a visitor's real name from
+GeoIP, IP-derived location, browser, operating system, device,
+referrer or any other anonymous telemetry.
+
+First Name, Last Name, Email, Phone and other personally supplied
+values MUST originate from an actual form submission or another
+explicitly identified user-provided data source.
+
+These fields MUST NOT be added to {prefix}vi_visitors simply to make the
+Visitors table display them.
+
+When a user submits a form, the submission MUST be associated with the
+visitor's existing visitor_id.
+
+A visitor MAY have zero, one or many form submissions.
+
+The required relationship is:
+
+{prefix}vi_visitors.visitor_id
+        |
+        +---- {prefix}vi_form_submissions.visitor_id
+
+7.10. Form Submission Storage
+-----------------------------
+
+Form submissions MUST be stored separately from the canonical visitor
+record.
+
+The implementation MUST provide a dedicated form-submission storage
+model.
+
+At minimum, a form submission MUST retain:
+
+- submission ID
+- visitor_id
+- form ID or form name
+- submitted_at
+- submitted data
+
+Submitted data MUST support arbitrary form fields.
+
+The implementation MUST NOT assume that every WordPress form has the
+same field set.
+
+The form-submission data model SHOULD therefore support structured
+key/value data or an equivalent flexible representation.
+
+A visitor MUST NOT be duplicated merely because a form submission was
+received.
+
+7.11. Form Submission Display
+-----------------------------
+
+Visitor Details MUST show all form submissions associated with the
+selected visitor.
+
+For each submission, the administrator SHOULD be able to see:
+
+- submission date/time
+- form identifier/name
+- submitted fields
+
+Example:
+
+Visitor:
+    visitor_id = <visitor>
+
+Form Submissions:
+
+    Contact Form
+    2026-08-14 19:12
+
+    Quote Request
+    2026-08-15 10:31
+
+Opening a submission MUST show the values actually submitted by the
+user.
+
+7.12. Visitor Repository Contract
+---------------------------------
+
+The VisitorRepository MUST provide an efficient query path for the
+Visitors administration interface.
+
+The repository MUST support:
+
+- search
+- filtering
+- sorting
+- pagination
+- total count / result metadata
+- visitor detail retrieval
+- filter option retrieval where required
+- export query reuse
+
+The repository MUST NOT implement the final Visitors page as a
+hard-coded:
+
+SELECT *
+FROM {prefix}vi_visitors
+ORDER BY id DESC
+LIMIT 100
+
+query.
+
+The repository MUST avoid N+1 retrieval patterns for the visitor list.
+
+The list query SHOULD select only the fields required by the table.
+
+7.13. Visitor Controller / REST Contract
+-----------------------------------------
+
+The Visitors administration layer SHOULD use the Visitor Controller
+and REST API rather than direct SQL from the admin page.
+
+The visitor list endpoint MUST support:
+
+- search
+- filters
+- sorting
+- pagination
+
+The visitor detail endpoint SHOULD support:
+
+- visitor details
+- associated form submissions
+
+A filter/options endpoint SHOULD provide values required to populate
+the administration filters.
+
+A server-side CSV export endpoint SHOULD reuse the same validated query
+conditions as the Visitors list.
+
+7.14. Performance Requirements
+------------------------------
+
+The Visitors interface MUST remain usable with a large number of
+records.
+
+The implementation MUST:
+
+- use database-side filtering;
+- use database-side sorting;
+- use database-side pagination;
+- avoid loading the complete table into JavaScript;
+- avoid N+1 queries;
+- use appropriate indexes;
+- avoid SELECT * when a smaller projection is sufficient.
+
+Indexes required by the canonical schema MUST be preserved.
+
+Additional indexes MAY be introduced when justified by the actual
+Visitors filtering/sorting workload.
+
+7.15. GeoIP Diagnostic State
+----------------------------
+
+The Visitors interface SHOULD make unresolved GeoIP records
+distinguishable from resolved records.
+
+A visitor with no GeoIP match MUST remain a valid visitor.
+
+The absence of GeoIP information MUST NOT prevent storage of the
+visitor or its activity.
+
+7.16. Hidden Technical Fields
+----------------------------
+
+The following fields are technical metadata and are intentionally
+hidden from the main Visitors table:
+
+- created_at
+- updated_at
+- geo_source
+- geo_database_version
+
+Latitude and longitude are also technical location details and SHOULD
+be hidden from the main table.
+
+Country and region codes SHOULD remain hidden from the main table when
+human-readable Country and Province / Region names are available.
+
+The hidden fields MUST NOT be deleted from storage solely because they
+are hidden from the UI.
+
+7.17. Future HubSpot Integration
+--------------------------------
+
+HubSpot integration is a future implementation phase.
+
+The Visitor subsystem MUST be designed so that HubSpot can later
+consume visitor and form-submission information without requiring a
+rewrite of the collection pipeline.
+
+Potential future contact data may originate from actual form
+submissions, including:
+
+- email
+- first_name
+- last_name
+- phone
+- country
+- province / region
+- city
+
+The final HubSpot mapping, authentication, synchronization rules,
+duplicate handling and contact lifecycle are OUT OF SCOPE for the
+current Visitors implementation.
+
+The current implementation MUST NOT assume that every visitor is a
+HubSpot contact.
+
+The current implementation MUST NOT exclude bots from storage solely
+because a future HubSpot integration may be added.
+
+7.18. Privacy / Raw IP
+----------------------
+
+The current Visitors administration requirements do not require raw IP
+to be displayed in the main table.
+
+Persistent raw IP storage MUST NOT be introduced without an explicit
+privacy and retention decision.
+
+GeoIP functionality MUST remain operational without exposing raw IP in
+the normal Visitors table.
+
+
+8. IMPLEMENTATION RULES FOR THIS SUBSYSTEM
+===========================================
+
+The following rules apply to all future work on the Visitor,
+GeoIP, Device and Visitors Administration subsystem.
+
+1. The existing canonical telemetry architecture remains authoritative.
+
+2. Server collection remains the source of truth for server-observable
+   facts.
+
+3. Browser collection remains the source of truth for browser-observable
+   behavioural metrics.
+
+4. GeoIP remains a server-side enrichment step.
+
+5. Device detection remains a server-side User-Agent enrichment step.
+
+6. Visitor records MUST remain independent of personally submitted form
+   identity data.
+
+7. Form submissions MUST be associated with visitors by visitor_id.
+
+8. The Visitors administration interface MUST use server-side queries.
+
+9. Filtering, sorting and pagination MUST NOT be implemented solely in
+   browser JavaScript.
+
+10. Existing working functionality MUST NOT be removed or simplified
+    merely to implement the Visitors UI.
+
+11. Technical database fields MUST NOT be deleted merely because they
+    are hidden from the main table.
+
+12. Bots MUST remain stored and visible as a classification.
+
+13. Future HubSpot integration MUST remain decoupled from the core
+    visitor collection pipeline.
+
+14. When replacing an existing source file, the complete file MUST be
+    provided. Partial fragments are not the working replacement format.
+
+15. After each implementation commit, the repository state MUST be
+    checked against the committed SHA before proceeding to the next
+    implementation step.
+
+16. If implementation requirements conflict with this specification or
+    with the existing canonical architecture, implementation MUST stop
+    until the conflict is resolved.
+
+
+9. UPDATED IMPLEMENTATION ROADMAP
+=================================
+
+The original implementation sequence remains authoritative through
+Step 13.
+
+The Visitor Administration work under Step 13 is expanded as follows:
+
+Step 13.1:
+    VisitorRepository
+    - efficient visitor list query
+    - search
+    - filters
+    - sorting
+    - pagination
+    - filter options
+    - detail retrieval
+
+Step 13.2:
+    VisitorController / REST
+    - list endpoint
+    - detail endpoint
+    - filter/options endpoint
+    - export endpoint
+
+Step 13.3:
+    WordPress Visitors Admin UI
+    - readable table
+    - filters
+    - sorting
+    - pagination
+    - search
+    - top horizontal scrollbar
+
+Step 13.4:
+    Visitor Details
+    - GeoIP details
+    - Device details
+    - Activity
+    - Bot information
+    - technical metadata
+
+Step 13.5:
+    Form Submission subsystem
+    - storage
+    - visitor_id association
+    - submitted data
+    - Visitor Details display
+
+Step 13.6:
+    CSV Export
+    - server-side generation
+    - active filters respected
+
+Step 13.7:
+    Performance and indexes
+    - query profiling
+    - required indexes
+    - large dataset behaviour
+
+Step 13.8:
+    Privacy decision
+    - raw IP storage decision
+    - retention
+    - anonymisation if required
+
+Step 13.9:
+    HubSpot integration
+    - separate future phase
+    - contact mapping
+    - synchronization
+    - duplicate prevention

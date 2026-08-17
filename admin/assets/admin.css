@@ -1,0 +1,59 @@
+.vi-dashboard-wrap {
+    margin-top: 20px;
+}
+
+.vi-stats-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.vi-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.vi-card h3 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #50575e;
+    text-transform: uppercase;
+}
+
+.vi-card .vi-card-value {
+    font-size: 28px;
+    font-weight: bold;
+    color: #1d2327;
+}
+
+.vi-chart-container {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 8px;
+    padding: 20px;
+}
+
+#viTrafficChart {
+	max-height: 50vh !important;
+}
+
+table.widefat.striped {
+  table-layout: fixed;
+  width: 100%; /* или любая другая ширина контейнера */
+}
+
+.widefat.striped td,
+.widefat.striped td * {
+  word-wrap: break-word; /* перенос длинных слов */
+  overflow-wrap: break-word;
+  word-break: break-all; /* разрывает строку даже внутри длинных URL */
+  max-width: 200px; /* установите нужную ширину */
+}
+
+.widefat.striped td:nth-child(1) {
+	width: 60%;
+}
