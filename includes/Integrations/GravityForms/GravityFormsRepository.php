@@ -188,6 +188,142 @@ final class GravityFormsRepository
         return $result;
     }
 
+    /**
+     * @param array<int, string> $visitorIds
+     * @return array<string, int>
+     */
+    public function getSubmissionCounts(
+        array $visitorIds
+    ): array {
+        if (
+            !$this->isAvailable()
+            || $visitorIds === []
+        ) {
+            return [];
+        }
+
+        $normalizedIds = [];
+
+        foreach (
+            $visitorIds as $visitorId
+        ) {
+            $visitorId =
+                trim(
+                    (string) $visitorId
+                );
+
+            if (
+                !$this->isValidVisitorId(
+                    $visitorId
+                )
+            ) {
+                continue;
+            }
+
+            $normalizedIds[
+                strtolower(
+                    $visitorId
+                )
+            ] =
+                $visitorId;
+        }
+
+        if (
+            $normalizedIds === []
+        ) {
+            return [];
+        }
+
+        $counts = [];
+
+        foreach (
+            array_values(
+                $normalizedIds
+            ) as $visitorId
+        ) {
+            $searchCriteria = [
+                'status' =>
+                    'active',
+
+                'field_filters' =>
+                    [
+                        [
+                            'key' =>
+                                'meta.'
+                                . self::VISITOR_META_KEY,
+
+                            'value' =>
+                                $visitorId,
+
+                            'operator' =>
+                                'is',
+                        ],
+                    ],
+            ];
+
+            $paging = [
+                'offset' =>
+                    0,
+
+                'page_size' =>
+                    100,
+            ];
+
+            $entries =
+                \GFAPI::get_entries(
+                    0,
+                    $searchCriteria,
+                    [],
+                    $paging
+                );
+
+            if (
+                is_wp_error(
+                    $entries
+                )
+                || !is_array(
+                    $entries
+                )
+            ) {
+                $counts[$visitorId] = 0;
+
+                continue;
+            }
+
+            $count = 0;
+
+            foreach (
+                $entries as $entry
+            ) {
+                if (
+                    !is_array(
+                        $entry
+                    )
+                ) {
+                    continue;
+                }
+
+                $entryId =
+                    isset(
+                        $entry['id']
+                    )
+                        ? (int) $entry['id']
+                        : 0;
+
+                if (
+                    $entryId > 0
+                ) {
+                    $count++;
+                }
+            }
+
+            $counts[$visitorId] =
+                $count;
+        }
+
+        return $counts;
+    }
+
     public function attachVisitorToEntry(
         int $entryId,
         string $visitorId

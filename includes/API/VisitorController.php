@@ -8,6 +8,7 @@ use WP_Error;
 use WP_REST_Request;
 use WP_REST_Response;
 use VisitorIntelligence\Database\Repositories\VisitorRepository;
+use VisitorIntelligence\Integrations\GravityForms\GravityFormsRepository;
 
 defined('ABSPATH') || exit;
 
@@ -45,7 +46,8 @@ final class VisitorController
     ];
 
     public function __construct(
-        private readonly VisitorRepository $repository
+        private readonly VisitorRepository $repository,
+        private readonly ?GravityFormsRepository $gravityForms = null
     ) {
     }
 
@@ -625,14 +627,102 @@ final class VisitorController
                     $perPage
                 );
 
+            $items =
+                $result['items'];
+
+            $visitorIds = [];
+
+            foreach (
+                $items as $item
+            ) {
+                if (
+                    !is_array($item)
+                ) {
+                    continue;
+                }
+
+                $visitorId =
+                    trim(
+                        (string) (
+                            $item['visitor_id']
+                            ?? ''
+                        )
+                    );
+
+                if (
+                    $visitorId !== ''
+                ) {
+                    $visitorIds[] =
+                        $visitorId;
+                }
+            }
+
+            $submissionCounts = [];
+
+            try {
+                $gravityForms =
+                    $this->gravityForms
+                    ?? new GravityFormsRepository();
+
+                $submissionCounts =
+                    $gravityForms->getSubmissionCounts(
+                        $visitorIds
+                    );
+            } catch (
+                \Throwable $exception
+            ) {
+                do_action(
+                    'vi_visitors_error',
+                    $exception,
+                    [
+                        'action' =>
+                            'gravity_forms_counts',
+                    ]
+                );
+            }
+
+            foreach (
+                $items as $index => $item
+            ) {
+                if (
+                    !is_array($item)
+                ) {
+                    continue;
+                }
+
+                $visitorId =
+                    trim(
+                        (string) (
+                            $item['visitor_id']
+                            ?? ''
+                        )
+                    );
+
+                $item[
+                    'form_submissions_count'
+                ] =
+                    isset(
+                        $submissionCounts[
+                            $visitorId
+                        ]
+                    )
+                        ? (int) $submissionCounts[
+                            $visitorId
+                        ]
+                        : 0;
+
+                $items[$index] =
+                    $item;
+            }
+
             return new WP_REST_Response(
                 [
                     'items' =>
-                        $result['items'],
+                        $items,
 
                     'count' =>
                         count(
-                            $result['items']
+                            $items
                         ),
 
                     'total' =>
@@ -860,13 +950,17 @@ final class VisitorController
                 $items[] = [
                     'pageview_id' =>
                         (string) (
-                            $pageview['pageview_id']
+                            $pageview[
+                                'pageview_id'
+                            ]
                             ?? ''
                         ),
 
                     'occurred_at' =>
                         (string) (
-                            $pageview['occurred_at']
+                            $pageview[
+                                'occurred_at'
+                            ]
                             ?? ''
                         ),
 
@@ -895,7 +989,9 @@ final class VisitorController
                         $visitorId,
 
                     'count' =>
-                        count($items),
+                        count(
+                            $items
+                        ),
 
                     'pageviews' =>
                         $items,
