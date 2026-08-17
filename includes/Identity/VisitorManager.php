@@ -86,7 +86,9 @@ final class VisitorManager
                 $visitorId
             );
 
-        if ($visitorId === '') {
+        if (
+            $visitorId === ''
+        ) {
             throw new \InvalidArgumentException(
                 'Visitor ID cannot be empty.'
             );
@@ -139,5 +141,56 @@ final class VisitorManager
         $this->repository->persist(
             $data
         );
+    }
+
+    public function incrementPageviews(
+        string $visitorId,
+        int $amount = 1
+    ): void {
+        $visitorId =
+            trim(
+                $visitorId
+            );
+
+        if (
+            $visitorId === ''
+        ) {
+            throw new \InvalidArgumentException(
+                'Visitor ID cannot be empty.'
+            );
+        }
+
+        if (
+            preg_match(
+                '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
+                $visitorId
+            ) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'Visitor ID must be a valid UUID.'
+            );
+        }
+
+        if (
+            $amount < 1
+        ) {
+            throw new \InvalidArgumentException(
+                'Pageview increment must be greater than zero.'
+            );
+        }
+
+        if (
+            !$this->repository->incrementPageviews(
+                $visitorId,
+                $amount
+            )
+        ) {
+            throw new \RuntimeException(
+                sprintf(
+                    'Unable to increment pageviews for visitor: %s',
+                    $visitorId
+                )
+            );
+        }
     }
 }

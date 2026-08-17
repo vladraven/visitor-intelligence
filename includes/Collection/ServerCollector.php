@@ -493,6 +493,10 @@ final class ServerCollector
             );
         }
 
+        $this->visitors->incrementPageviews(
+            $visitorId
+        );
+
         $this->clientContext = [
             'endpoint' =>
                 rest_url(
