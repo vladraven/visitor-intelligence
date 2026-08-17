@@ -794,6 +794,33 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
     }
 
     /**
+     * Returns the complete filtered visitor set used by
+     * external sorting such as Gravity Forms submission count.
+     *
+     * This method intentionally does not know anything about Gravity Forms.
+     *
+     * @param array<string, mixed> $filters
+     * @return array<int, array<string, mixed>>
+     */
+    public function findAllForExternalSort(
+        array $filters = []
+    ): array {
+        [$sql, $values] =
+            $this->buildVisitorListQuery(
+                $filters,
+                'last_seen',
+                'DESC',
+                self::MAX_LIST_LIMIT,
+                0
+            );
+
+        return $this->database->getResults(
+            $sql,
+            ...$values
+        );
+    }
+
+    /**
      * @param array<string, mixed> $filters
      * @return array<int, array<string, mixed>>
      */
@@ -1400,7 +1427,7 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
                     1,
                     $limit
                 ),
-                self::MAX_PER_PAGE
+                self::MAX_LIST_LIMIT
             );
 
         $offset =

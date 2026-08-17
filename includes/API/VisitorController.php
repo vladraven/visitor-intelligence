@@ -43,6 +43,7 @@ final class VisitorController
         'browser',
         'os',
         'bot_classification',
+        'form_submissions_count',
     ];
 
     public function __construct(
@@ -618,111 +619,41 @@ final class VisitorController
                     $request
                 );
 
-            $result =
-                $this->repository->paginate(
-                    $filters,
-                    $sort,
-                    $direction,
-                    $page,
-                    $perPage
-                );
-
-            $items =
-                $result['items'];
-
-            $visitorIds = [];
-
-            foreach (
-                $items as $item
+            if (
+                $sort ===
+                'form_submissions_count'
             ) {
-                if (
-                    !is_array($item)
-                ) {
-                    continue;
-                }
-
-                $visitorId =
-                    trim(
-                        (string) (
-                            $item['visitor_id']
-                            ?? ''
-                        )
+                $result =
+                    $this->getVisitorsSortedByFormSubmission(
+                        $filters,
+                        $page,
+                        $perPage,
+                        $direction
+                    );
+            } else {
+                $result =
+                    $this->repository->paginate(
+                        $filters,
+                        $sort,
+                        $direction,
+                        $page,
+                        $perPage
                     );
 
-                if (
-                    $visitorId !== ''
-                ) {
-                    $visitorIds[] =
-                        $visitorId;
-                }
-            }
-
-            $submissionCounts = [];
-
-            try {
-                $gravityForms =
-                    $this->gravityForms
-                    ?? new GravityFormsRepository();
-
-                $submissionCounts =
-                    $gravityForms->getSubmissionCounts(
-                        $visitorIds
+                $result['items'] =
+                    $this->attachSubmissionCounts(
+                        $result['items']
                     );
-            } catch (
-                \Throwable $exception
-            ) {
-                do_action(
-                    'vi_visitors_error',
-                    $exception,
-                    [
-                        'action' =>
-                            'gravity_forms_counts',
-                    ]
-                );
-            }
-
-            foreach (
-                $items as $index => $item
-            ) {
-                if (
-                    !is_array($item)
-                ) {
-                    continue;
-                }
-
-                $visitorId =
-                    trim(
-                        (string) (
-                            $item['visitor_id']
-                            ?? ''
-                        )
-                    );
-
-                $item[
-                    'form_submissions_count'
-                ] =
-                    isset(
-                        $submissionCounts[
-                            $visitorId
-                        ]
-                    )
-                        ? (int) $submissionCounts[
-                            $visitorId
-                        ]
-                        : 0;
-
-                $items[$index] =
-                    $item;
             }
 
             return new WP_REST_Response(
                 [
                     'items' =>
-                        $items,
+                        $result['items'],
 
                     'count' =>
                         count(
-                            $items
+                            $result['items']
                         ),
 
                     'total' =>
@@ -772,6 +703,232 @@ final class VisitorController
                 ]
             );
         }
+    }
+
+    /**
+     * Attach Gravity Forms submission counts to a visitor result set.
+     *
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function attachSubmissionCounts(
+        array $items
+    ): array {
+        $visitorIds = [];
+
+        foreach (
+            $items as $item
+        ) {
+            if (
+                !is_array($item)
+            ) {
+                continue;
+            }
+
+            $visitorId =
+                trim(
+                    (string) (
+                        $item['visitor_id']
+                        ?? ''
+                    )
+                );
+
+            if (
+                $visitorId !== ''
+            ) {
+                $visitorIds[] =
+                    $visitorId;
+            }
+        }
+
+        $submissionCounts = [];
+
+        try {
+            $gravityForms =
+                $this->gravityForms
+                ?? new GravityFormsRepository();
+
+            $submissionCounts =
+                $gravityForms->getSubmissionCounts(
+                    $visitorIds
+                );
+        } catch (
+            \Throwable $exception
+        ) {
+            do_action(
+                'vi_visitors_error',
+                $exception,
+                [
+                    'action' =>
+                        'gravity_forms_counts',
+                ]
+            );
+        }
+
+        foreach (
+            $items as $index => $item
+        ) {
+            if (
+                !is_array($item)
+            ) {
+                continue;
+            }
+
+            $visitorId =
+                trim(
+                    (string) (
+                        $item['visitor_id']
+                        ?? ''
+                    )
+                );
+
+            $item[
+                'form_submissions_count'
+            ] =
+                isset(
+                    $submissionCounts[
+                        $visitorId
+                    ]
+                )
+                    ? (int) $submissionCounts[
+                        $visitorId
+                    ]
+                    : 0;
+
+            $items[$index] =
+                $item;
+        }
+
+        return $items;
+    }
+
+    /**
+     * Sort visitors globally by Gravity Forms submission count.
+     *
+     * @param array<string, mixed> $filters
+     * @return array{
+     *     items: array<int, array<string, mixed>>,
+     *     total: int,
+     *     page: int,
+     *     per_page: int,
+     *     total_pages: int
+     * }
+     */
+    private function getVisitorsSortedByFormSubmission(
+        array $filters,
+        int $page,
+        int $perPage,
+        string $direction
+    ): array {
+        $items =
+            $this->repository->findAllForExternalSort(
+                $filters
+            );
+
+        $items =
+            $this->attachSubmissionCounts(
+                $items
+            );
+
+        usort(
+            $items,
+            static function (
+                array $left,
+                array $right
+            ) use ($direction): int {
+                $leftCount =
+                    (int) (
+                        $left[
+                            'form_submissions_count'
+                        ]
+                        ?? 0
+                    );
+
+                $rightCount =
+                    (int) (
+                        $right[
+                            'form_submissions_count'
+                        ]
+                        ?? 0
+                    );
+
+                if (
+                    $leftCount ===
+                    $rightCount
+                ) {
+                    $leftId =
+                        (int) (
+                            $left['id']
+                            ?? 0
+                        );
+
+                    $rightId =
+                        (int) (
+                            $right['id']
+                            ?? 0
+                        );
+
+                    return $rightId
+                        <=>
+                        $leftId;
+                }
+
+                $comparison =
+                    $leftCount
+                    <=>
+                    $rightCount;
+
+                return $direction ===
+                    'DESC'
+                    ? -$comparison
+                    : $comparison;
+            }
+        );
+
+        $total =
+            count(
+                $items
+            );
+
+        $totalPages =
+            $total > 0
+                ? (int) ceil(
+                    $total / $perPage
+                )
+                : 0;
+
+        if (
+            $totalPages > 0
+            && $page > $totalPages
+        ) {
+            $page =
+                $totalPages;
+        }
+
+        $offset =
+            ($page - 1)
+            * $perPage;
+
+        return [
+            'items' =>
+                array_slice(
+                    $items,
+                    $offset,
+                    $perPage
+                ),
+
+            'total' =>
+                $total,
+
+            'page' =>
+                $page,
+
+            'per_page' =>
+                $perPage,
+
+            'total_pages' =>
+                $totalPages,
+        ];
     }
 
     public function getFilterOptions(

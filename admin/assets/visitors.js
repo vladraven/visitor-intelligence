@@ -368,36 +368,6 @@
         );
     }
 
-    function getCoordinates(
-        visitor
-    ) {
-        const latitude =
-            visitor?.latitude;
-
-        const longitude =
-            visitor?.longitude;
-
-        if (
-            latitude === null
-            || latitude === undefined
-            || latitude === ''
-            || longitude === null
-            || longitude === undefined
-            || longitude === ''
-        ) {
-            return (
-                config.strings?.notAvailable
-                || 'N/A'
-            );
-        }
-
-        return (
-            escapeHtml(latitude)
-            + ', '
-            + escapeHtml(longitude)
-        );
-    }
-
     function getCountry(
         visitor
     ) {
@@ -475,6 +445,108 @@
     ) {
         return escapeHtml(
             visitor?.bot_classification
+        );
+    }
+
+    function formatFormSubmission(
+        value
+    ) {
+        const count =
+            Number(
+                value ?? 0
+            );
+
+        if (
+            !Number.isFinite(count)
+            || count <= 0
+        ) {
+            return 'No';
+        }
+
+        return (
+            'Yes ('
+            + String(count)
+            + ')'
+        );
+    }
+
+    function ensureFormSubmissionHeader() {
+        const table =
+            document.getElementById(
+                'vi-visitors-table'
+            );
+
+        if (!table) {
+            return;
+        }
+
+        const headerRow =
+            table.querySelector(
+                'thead tr'
+            );
+
+        if (!headerRow) {
+            return;
+        }
+
+        let header =
+            headerRow.querySelector(
+                '[data-sort="form_submissions_count"]'
+            );
+
+        if (header) {
+            header.classList.add(
+                'vi-sortable'
+            );
+
+            if (
+                !header.querySelector(
+                    '.vi-sort-indicator'
+                )
+            ) {
+                const indicator =
+                    document.createElement(
+                        'span'
+                    );
+
+                indicator.className =
+                    'vi-sort-indicator';
+
+                header.appendChild(
+                    indicator
+                );
+            }
+
+            return;
+        }
+
+        const pageviewsHeader =
+            headerRow.querySelector(
+                '[data-sort="pageviews_count"]'
+            );
+
+        if (!pageviewsHeader) {
+            return;
+        }
+
+        header =
+            document.createElement(
+                'th'
+            );
+
+        header.className =
+            'vi-sortable vi-form-submission-header';
+
+        header.dataset.sort =
+            'form_submissions_count';
+
+        header.innerHTML =
+            'Form Submission '
+            + '<span class="vi-sort-indicator"></span>';
+
+        pageviewsHeader.insertAdjacentElement(
+            'afterend',
+            header
         );
     }
 
@@ -591,11 +663,13 @@
                     </td>
 
                     <td>
-                        ${getBotType(visitor)}
+                        ${formatFormSubmission(
+                            visitor?.form_submissions_count
+                        )}
                     </td>
 
                     <td>
-                        ${getCoordinates(visitor)}
+                        ${getBotType(visitor)}
                     </td>
                 `;
 
@@ -715,8 +789,8 @@
 
                 indicator.textContent =
                     state.direction === 'ASC'
-                        ? '↑'
-                        : '↓';
+                        ? ' ↑'
+                        : ' ↓';
             }
         );
     }
@@ -939,7 +1013,8 @@
                             ? payload.visitors
                             : [];
 
-            state.visitors = items;
+            state.visitors =
+                items;
 
             state.page =
                 Number(
@@ -969,6 +1044,7 @@
             renderRows();
             renderPagination();
             renderListState();
+
         } catch (
             error
         ) {
@@ -990,6 +1066,7 @@
                 || 'Unable to load visitors.',
                 'error'
             );
+
         } finally {
             setLoading(
                 false
@@ -1018,6 +1095,7 @@
                 || state.filterOptions;
 
             renderFilterOptions();
+
         } catch (
             error
         ) {
@@ -1355,8 +1433,6 @@
         state.page =
             1;
 
-        loadFilterOptions();
-
         loadVisitors();
     }
 
@@ -1388,6 +1464,7 @@
         hideStatus();
 
         loadFilterOptions();
+
         loadVisitors();
     }
 
@@ -1500,6 +1577,13 @@
                         </tr>
 
                         <tr>
+                            <th>Form Submission</th>
+                            <td>${formatFormSubmission(
+                                visitor?.form_submissions_count
+                            )}</td>
+                        </tr>
+
+                        <tr>
                             <th>Active Time</th>
                             <td>${escapeHtml(visitor?.active_seconds)}</td>
                         </tr>
@@ -1535,16 +1619,6 @@
                         <tr>
                             <th>City</th>
                             <td>${escapeHtml(visitor?.city)}</td>
-                        </tr>
-
-                        <tr>
-                            <th>Latitude</th>
-                            <td>${escapeHtml(visitor?.latitude)}</td>
-                        </tr>
-
-                        <tr>
-                            <th>Longitude</th>
-                            <td>${escapeHtml(visitor?.longitude)}</td>
                         </tr>
 
                         <tr>
@@ -1632,6 +1706,14 @@
             block:
                 'start',
         });
+
+        loadPageviews(
+            visitorId,
+            Number(
+                visitor?.pageviews_count
+                || 0
+            )
+        );
     }
 
     function getPageviewsUrl(
@@ -1773,6 +1855,7 @@
                 payload?.count
                 ?? expectedCount
             );
+
         } catch (
             error
         ) {
@@ -1819,13 +1902,6 @@
                 payload.visitor
             );
 
-            loadPageviews(
-                visitorId,
-                Number(
-                    payload.visitor?.pageviews_count
-                    || 0
-                )
-            );
         } catch (
             error
         ) {
@@ -1925,6 +2001,16 @@
 
         headers.forEach(
             function (header) {
+                if (
+                    header.dataset.sortBound
+                    === '1'
+                ) {
+                    return;
+                }
+
+                header.dataset.sortBound =
+                    '1';
+
                 header.addEventListener(
                     'click',
                     function () {
@@ -2008,17 +2094,17 @@
                         return;
                     }
 
-                    const button =
+                    const visitorButton =
                         event.target.closest(
                             '.vi-visitor-link'
                         );
 
-                    if (!button) {
+                    if (!visitorButton) {
                         return;
                     }
 
                     const visitorId =
-                        button.dataset.visitorId
+                        visitorButton.dataset.visitorId
                         || '';
 
                     loadVisitor(
@@ -2048,6 +2134,8 @@
                 }
             );
         }
+
+        ensureFormSubmissionHeader();
 
         bindSortEvents();
     }
@@ -2091,6 +2179,7 @@
                     visitor?.os_version ?? '',
                     visitor?.sessions_count ?? '',
                     visitor?.pageviews_count ?? '',
+                    visitor?.form_submissions_count ?? 0,
                     visitor?.bot_classification ?? '',
                 ];
             }
@@ -2115,6 +2204,7 @@
             'OS Version',
             'Sessions',
             'Pageviews',
+            'Form Submission',
             'Type',
         ];
 
@@ -2231,7 +2321,10 @@
             let totalPages =
                 1;
 
-            do {
+            while (
+                state.page <=
+                totalPages
+            ) {
                 const url =
                     getVisitorsUrl();
 
@@ -2255,6 +2348,12 @@
                                 ? payload.visitors
                                 : [];
 
+                if (
+                    visitors.length === 0
+                ) {
+                    break;
+                }
+
                 allVisitors.push(
                     ...visitors
                 );
@@ -2267,16 +2366,15 @@
                     );
 
                 if (
-                    visitors.length === 0
-                    || state.page >= totalPages
+                    state.page >=
+                    totalPages
                 ) {
                     break;
                 }
 
                 state.page +=
                     1;
-
-            } while (true);
+            }
 
             if (
                 allVisitors.length === 0
@@ -2342,7 +2440,82 @@
         }
     }
 
+function removeCoordinatesColumn() {
+    const table =
+        document.getElementById(
+            'vi-visitors-table'
+        );
+
+    if (!table) {
+        return;
+    }
+
+    const headerRow =
+        table.querySelector(
+            'thead tr'
+        );
+
+    if (!headerRow) {
+        return;
+    }
+
+    const headers =
+        Array.from(
+            headerRow.children
+        );
+
+    const coordinatesIndex =
+        headers.findIndex(
+            function (header) {
+                return (
+                    header.textContent
+                        .trim()
+                        .toLowerCase()
+                    === 'coordinates'
+                );
+            }
+        );
+
+    if (
+        coordinatesIndex === -1
+    ) {
+        return;
+    }
+
+    headerRow.removeChild(
+        headerRow.children[
+            coordinatesIndex
+        ]
+    );
+
+    const bodyRows =
+        table.querySelectorAll(
+            'tbody tr'
+        );
+
+    bodyRows.forEach(
+        function (row) {
+            if (
+                row.children.length
+                <= coordinatesIndex
+            ) {
+                return;
+            }
+
+            row.removeChild(
+                row.children[
+                    coordinatesIndex
+                ]
+            );
+        }
+    );
+}
+
     function initialize() {
+        removeCoordinatesColumn();
+		
+		ensureFormSubmissionHeader();
+
         bindEvents();
 
         loadFilterOptions();
