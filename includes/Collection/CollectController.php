@@ -600,40 +600,28 @@ final class CollectController
     private function isUtcDateTime(
         string $value
     ): bool {
-        $value =
-            trim(
-                $value
-            );
+        $value = trim($value);
 
-        $date =
-            \DateTimeImmutable::createFromFormat(
-                '!Y-m-d H:i:s',
-                $value,
-                new \DateTimeZone('UTC')
-            );
-
-        if (
-            $date === false
-        ) {
+        if ($value === '') {
             return false;
         }
 
-        $errors =
-            \DateTimeImmutable::getLastErrors();
+        $date = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d H:i:s',
+            $value,
+            new \DateTimeZone('UTC')
+        );
 
-        if (
-            is_array($errors)
-            && (
-                $errors['warning_count'] > 0
-                || $errors['error_count'] > 0
-            )
-        ) {
-            return false;
+        if ($date !== false && $date->format('Y-m-d H:i:s') === $value) {
+            return true;
         }
 
-        return $date->format(
-            'Y-m-d H:i:s'
-        ) === $value;
+        try {
+            $parsed = new \DateTimeImmutable($value, new \DateTimeZone('UTC'));
+            return $parsed->getTimestamp() > 0;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function invalidPayload(

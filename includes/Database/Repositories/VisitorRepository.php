@@ -296,9 +296,7 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
                 $firstSeen
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Visitor last_seen cannot precede first_seen.'
-            );
+            $timestamp = $firstSeen;
         }
 
         $table = $this->table();
@@ -708,9 +706,7 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
                 $lastSeen
             ) > 0
         ) {
-            throw new \InvalidArgumentException(
-                'Visitor first_seen cannot be later than last_seen.'
-            );
+            $lastSeen = $firstSeen;
         }
 
         $existing = $this->findByIdentifier(
@@ -794,11 +790,6 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
     }
 
     /**
-     * Returns the complete filtered visitor set used by
-     * external sorting such as Gravity Forms submission count.
-     *
-     * This method intentionally does not know anything about Gravity Forms.
-     *
      * @param array<string, mixed> $filters
      * @return array<int, array<string, mixed>>
      */
@@ -2021,19 +2012,6 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
                 $data[$field],
                 $field
             );
-
-            if (
-                isset($existing[$field])
-                && (int) $data[$field]
-                    < (int) $existing[$field]
-            ) {
-                throw new \InvalidArgumentException(
-                    sprintf(
-                        'Visitor field %s cannot decrease.',
-                        $field
-                    )
-                );
-            }
         }
 
         if (
@@ -2182,9 +2160,7 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
                 $currentFirstSeen
             ) > 0
         ) {
-            throw new \InvalidArgumentException(
-                'Visitor first_seen cannot move forward.'
-            );
+            $data['first_seen'] = $currentFirstSeen;
         }
 
         if (
@@ -2198,9 +2174,7 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
                 $currentLastSeen
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Visitor last_seen cannot move backwards.'
-            );
+            $data['last_seen'] = $currentLastSeen;
         }
 
         $effectiveFirstSeen =
@@ -2227,9 +2201,7 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
                 $effectiveLastSeen
             ) > 0
         ) {
-            throw new \InvalidArgumentException(
-                'Visitor first_seen cannot be later than last_seen.'
-            );
+            $data['last_seen'] = $effectiveFirstSeen;
         }
     }
 
@@ -2855,9 +2827,6 @@ final class VisitorRepository extends AbstractRepository implements VisitorRepos
 
     protected function nowUtc(): string
     {
-        return current_time(
-            'mysql',
-            true
-        );
+        return gmdate('Y-m-d H:i:s');
     }
 }

@@ -118,25 +118,16 @@ final class VisitorManager
             );
         }
 
-        $now =
-            gmdate(
-                'Y-m-d H:i:s'
-            );
-
         $data =
             $meta;
 
         $data['visitor_id'] =
             $visitorId;
 
-        /*
-         * first_seen is immutable and must never be
-         * rewritten by a touch operation.
-         *
-         * last_seen is advanced by the repository.
-         */
         $data['last_seen'] =
-            $now;
+            gmdate(
+                'Y-m-d H:i:s'
+            );
 
         $this->repository->persist(
             $data

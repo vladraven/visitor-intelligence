@@ -67,36 +67,6 @@ final class AnalyticsController
                                     ): int {
                                         return (int) $value;
                                     },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        if (
-                                            is_array($value)
-                                            || is_object($value)
-                                        ) {
-                                            return false;
-                                        }
-
-                                        $days =
-                                            filter_var(
-                                                $value,
-                                                FILTER_VALIDATE_INT
-                                            );
-
-                                        if (
-                                            $days === false
-                                        ) {
-                                            return false;
-                                        }
-
-                                        return
-                                            $days >=
-                                                self::MIN_RANGE_DAYS
-                                            && $days <=
-                                                self::MAX_RANGE_DAYS;
-                                    },
                             ],
 
                         'from' =>
@@ -110,15 +80,6 @@ final class AnalyticsController
                                     ): string {
                                         return trim(
                                             (string) $value
-                                        );
-                                    },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        return self::isValidDate(
-                                            $value
                                         );
                                     },
                             ],
@@ -136,15 +97,6 @@ final class AnalyticsController
                                             (string) $value
                                         );
                                     },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        return self::isValidDate(
-                                            $value
-                                        );
-                                    },
                             ],
 
                         'date' =>
@@ -158,15 +110,6 @@ final class AnalyticsController
                                     ): string {
                                         return trim(
                                             (string) $value
-                                        );
-                                    },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        return self::isValidDate(
-                                            $value
                                         );
                                     },
                             ],
@@ -189,24 +132,6 @@ final class AnalyticsController
                                             )
                                         );
                                     },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        return in_array(
-                                            strtolower(
-                                                trim(
-                                                    (string) $value
-                                                )
-                                            ),
-                                            [
-                                                'day',
-                                                'hour',
-                                            ],
-                                            true
-                                        );
-                                    },
                             ],
 
                         'view' =>
@@ -227,24 +152,6 @@ final class AnalyticsController
                                             )
                                         );
                                     },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        return in_array(
-                                            strtolower(
-                                                trim(
-                                                    (string) $value
-                                                )
-                                            ),
-                                            [
-                                                'overview',
-                                                'pages',
-                                            ],
-                                            true
-                                        );
-                                    },
                             ],
 
                         'limit' =>
@@ -260,35 +167,6 @@ final class AnalyticsController
                                         mixed $value
                                     ): int {
                                         return (int) $value;
-                                    },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        if (
-                                            is_array($value)
-                                            || is_object($value)
-                                        ) {
-                                            return false;
-                                        }
-
-                                        $limit =
-                                            filter_var(
-                                                $value,
-                                                FILTER_VALIDATE_INT
-                                            );
-
-                                        if (
-                                            $limit === false
-                                        ) {
-                                            return false;
-                                        }
-
-                                        return
-                                            $limit >= 1
-                                            && $limit <=
-                                                self::MAX_PAGE_LIMIT;
                                     },
                             ],
                     ],
@@ -351,33 +229,7 @@ final class AnalyticsController
                 $exception,
                 [
                     'request' =>
-                        [
-                            'days' =>
-                                $request->get_param(
-                                    'days'
-                                ),
-
-                            'from' =>
-                                $request->get_param(
-                                    'from'
-                                ),
-
-                            'to' =>
-                                $request->get_param(
-                                    'to'
-                                ),
-
-                            'date' =>
-                                $request->get_param(
-                                    'date'
-                                ),
-
-                            'granularity' =>
-                                $granularity,
-
-                            'view' =>
-                                $view,
-                        ],
+                        $request->get_params(),
                 ]
             );
 
@@ -567,21 +419,9 @@ final class AnalyticsController
             );
 
         if (
-            $date === ''
+            $date === '' || !self::isValidDate($date)
         ) {
-            throw new \InvalidArgumentException(
-                'The date parameter is required for hourly analytics.'
-            );
-        }
-
-        if (
-            !self::isValidDate(
-                $date
-            )
-        ) {
-            throw new \InvalidArgumentException(
-                'Invalid analytics date.'
-            );
+            $date = gmdate('Y-m-d');
         }
 
         $hourly =
@@ -831,47 +671,14 @@ final class AnalyticsController
 
         if (
             $from !== ''
-            || $to !== ''
+            && $to !== ''
+            && self::isValidDate($from)
+            && self::isValidDate($to)
         ) {
-            if (
-                $from === ''
-                || $to === ''
-            ) {
-                throw new \InvalidArgumentException(
-                    'Both from and to dates are required.'
-                );
-            }
-
-            if (
-                !self::isValidDate($from)
-                || !self::isValidDate($to)
-            ) {
-                throw new \InvalidArgumentException(
-                    'Invalid analytics date range.'
-                );
-            }
-
-            if (
-                $from > $to
-            ) {
-                throw new \InvalidArgumentException(
-                    'Analytics range start cannot be after range end.'
-                );
-            }
-
-            $days =
-                $this->daysBetween(
-                    $from,
-                    $to
-                );
-
-            if (
-                $days < self::MIN_RANGE_DAYS
-                || $days > self::MAX_RANGE_DAYS
-            ) {
-                throw new \InvalidArgumentException(
-                    'Analytics range is outside the supported limits.'
-                );
+            if ($from > $to) {
+                $temp = $from;
+                $from = $to;
+                $to = $temp;
             }
 
             return [
@@ -976,20 +783,14 @@ final class AnalyticsController
         mixed $value
     ): bool {
         if (
-            is_array($value)
-            || is_object($value)
+            !is_string($value)
         ) {
             return false;
         }
 
-        $date =
-            trim(
-                (string) $value
-            );
+        $date = trim($value);
 
-        if (
-            $date === ''
-        ) {
+        if ($date === '') {
             return false;
         }
 
@@ -1000,20 +801,6 @@ final class AnalyticsController
                 new \DateTimeZone('UTC')
             );
 
-        $errors =
-            \DateTimeImmutable::getLastErrors();
-
-        return
-            $parsed !== false
-            && (
-                !is_array($errors)
-                || (
-                    $errors['warning_count'] === 0
-                    && $errors['error_count'] === 0
-                )
-            )
-            && $parsed->format(
-                'Y-m-d'
-            ) === $date;
+        return $parsed !== false && $parsed->format('Y-m-d') === $date;
     }
 }

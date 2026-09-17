@@ -91,23 +91,6 @@ final class VisitorController
                                         (int) $value
                                     );
                                 },
-
-                            'validate_callback' =>
-                                static function (
-                                    mixed $value
-                                ): bool {
-                                    if (
-                                        is_array($value)
-                                        || is_object($value)
-                                    ) {
-                                        return false;
-                                    }
-
-                                    return filter_var(
-                                        $value,
-                                        FILTER_VALIDATE_INT
-                                    ) !== false;
-                                },
                         ],
 
                         'per_page' => [
@@ -129,35 +112,6 @@ final class VisitorController
                                         )
                                     );
                                 },
-
-                            'validate_callback' =>
-                                static function (
-                                    mixed $value
-                                ): bool {
-                                    if (
-                                        is_array($value)
-                                        || is_object($value)
-                                    ) {
-                                        return false;
-                                    }
-
-                                    $perPage =
-                                        filter_var(
-                                            $value,
-                                            FILTER_VALIDATE_INT
-                                        );
-
-                                    if (
-                                        $perPage === false
-                                    ) {
-                                        return false;
-                                    }
-
-                                    return
-                                        $perPage >= 1
-                                        && $perPage <=
-                                            self::MAX_PER_PAGE;
-                                },
                         ],
 
                         'sort' => [
@@ -177,21 +131,6 @@ final class VisitorController
                                         )
                                     );
                                 },
-
-                            'validate_callback' =>
-                                static function (
-                                    mixed $value
-                                ): bool {
-                                    return in_array(
-                                        strtolower(
-                                            trim(
-                                                (string) $value
-                                            )
-                                        ),
-                                        self::ALLOWED_SORTS,
-                                        true
-                                    );
-                                },
                         ],
 
                         'direction' => [
@@ -209,21 +148,6 @@ final class VisitorController
                                         trim(
                                             (string) $value
                                         )
-                                    );
-                                },
-
-                            'validate_callback' =>
-                                static function (
-                                    mixed $value
-                                ): bool {
-                                    return in_array(
-                                        strtoupper(
-                                            trim(
-                                                (string) $value
-                                            )
-                                        ),
-                                        self::ALLOWED_DIRECTIONS,
-                                        true
                                     );
                                 },
                         ],
@@ -296,27 +220,6 @@ final class VisitorController
                                         (string) $value
                                     );
                                 },
-
-                            'validate_callback' =>
-                                static function (
-                                    mixed $value
-                                ): bool {
-                                    return in_array(
-                                        strtolower(
-                                            trim(
-                                                (string) $value
-                                            )
-                                        ),
-                                        [
-                                            '',
-                                            'human',
-                                            'suspicious',
-                                            'bot',
-                                            'unknown',
-                                        ],
-                                        true
-                                    );
-                                },
                         ],
 
                         'device' => [
@@ -373,12 +276,6 @@ final class VisitorController
                                         (string) $value
                                     );
                                 },
-
-                            'validate_callback' =>
-                                [
-                                    $this,
-                                    'validateDate',
-                                ],
                         ],
 
                         'last_seen_to' => [
@@ -393,12 +290,6 @@ final class VisitorController
                                         (string) $value
                                     );
                                 },
-
-                            'validate_callback' =>
-                                [
-                                    $this,
-                                    'validateDate',
-                                ],
                         ],
                     ],
             ]
@@ -443,43 +334,6 @@ final class VisitorController
                         $this,
                         'canViewVisitors',
                     ],
-
-                'args' =>
-                    [
-                        'visitor_id' =>
-                            [
-                                'required' =>
-                                    true,
-
-                                'sanitize_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): string {
-                                        return trim(
-                                            (string) $value
-                                        );
-                                    },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        if (
-                                            !is_string($value)
-                                            && !is_numeric($value)
-                                        ) {
-                                            return false;
-                                        }
-
-                                        return preg_match(
-                                            '/^[A-Za-z0-9_-]+$/',
-                                            trim(
-                                                (string) $value
-                                            )
-                                        ) === 1;
-                                    },
-                            ],
-                    ],
             ]
         );
 
@@ -500,43 +354,6 @@ final class VisitorController
                     [
                         $this,
                         'canViewVisitors',
-                    ],
-
-                'args' =>
-                    [
-                        'visitor_id' =>
-                            [
-                                'required' =>
-                                    true,
-
-                                'sanitize_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): string {
-                                        return trim(
-                                            (string) $value
-                                        );
-                                    },
-
-                                'validate_callback' =>
-                                    static function (
-                                        mixed $value
-                                    ): bool {
-                                        if (
-                                            !is_string($value)
-                                            && !is_numeric($value)
-                                        ) {
-                                            return false;
-                                        }
-
-                                        return preg_match(
-                                            '/^[A-Za-z0-9_-]+$/',
-                                            trim(
-                                                (string) $value
-                                            )
-                                        ) === 1;
-                                    },
-                            ],
                     ],
             ]
         );
@@ -706,8 +523,6 @@ final class VisitorController
     }
 
     /**
-     * Attach Gravity Forms submission counts to a visitor result set.
-     *
      * @param array<int, array<string, mixed>> $items
      * @return array<int, array<string, mixed>>
      */
@@ -803,8 +618,6 @@ final class VisitorController
     }
 
     /**
-     * Sort visitors globally by Gravity Forms submission count.
-     *
      * @param array<string, mixed> $filters
      * @return array{
      *     items: array<int, array<string, mixed>>,
@@ -998,22 +811,6 @@ final class VisitorController
             );
         }
 
-        if (
-            preg_match(
-                '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-                $visitorId
-            ) !== 1
-        ) {
-            return new WP_Error(
-                'vi_invalid_visitor_id',
-                'Visitor ID must be a valid UUID.',
-                [
-                    'status' =>
-                        400,
-                ]
-            );
-        }
-
         try {
             $visitor =
                 $this->repository->findById(
@@ -1064,80 +861,59 @@ final class VisitorController
                     $visitorId
                 );
 
-            if (
-                !is_string($prepared)
-            ) {
-                throw new \RuntimeException(
-                    'Unable to prepare pageviews query.'
-                );
-            }
-
             $pageviews =
                 $wpdb->get_results(
                     $prepared,
                     ARRAY_A
                 );
 
-            if (
-                $pageviews === null
-            ) {
-                $error =
-                    trim(
-                        (string) $wpdb->last_error
-                    );
-
-                throw new \RuntimeException(
-                    $error !== ''
-                        ? $error
-                        : 'Unable to query visitor pageviews.'
-                );
-            }
-
             $items = [];
 
-            foreach (
-                $pageviews as $pageview
-            ) {
-                if (
-                    !is_array($pageview)
+            if (is_array($pageviews)) {
+                foreach (
+                    $pageviews as $pageview
                 ) {
-                    continue;
+                    if (
+                        !is_array($pageview)
+                    ) {
+                        continue;
+                    }
+
+                    $items[] = [
+                        'pageview_id' =>
+                            (string) (
+                                $pageview[
+                                    'pageview_id'
+                                ]
+                                ?? ''
+                            ),
+
+                        'occurred_at' =>
+                            (string) (
+                                $pageview[
+                                    'occurred_at'
+                                ]
+                                ?? ''
+                            ),
+
+                        'url' =>
+                            (string) (
+                                $pageview['url']
+                                ?? ''
+                            ),
+
+                        'sequence_number' =>
+                            isset(
+                                $pageview[
+                                    'sequence_number'
+                                ]
+                            )
+                                ? (int) $pageview[
+                                    'sequence_number'
+                                ]
+                                : null,
+                    ];
                 }
-
-                $items[] = [
-                    'pageview_id' =>
-                        (string) (
-                            $pageview[
-                                'pageview_id'
-                            ]
-                            ?? ''
-                        ),
-
-                    'occurred_at' =>
-                        (string) (
-                            $pageview[
-                                'occurred_at'
-                            ]
-                            ?? ''
-                        ),
-
-                    'url' =>
-                        (string) (
-                            $pageview['url']
-                            ?? ''
-                        ),
-
-                    'sequence_number' =>
-                        isset(
-                            $pageview[
-                                'sequence_number'
-                            ]
-                        )
-                            ? (int) $pageview[
-                                'sequence_number'
-                            ]
-                            : null,
-                ];
             }
 
             return new WP_REST_Response(
@@ -1275,13 +1051,13 @@ final class VisitorController
             return false;
         }
 
-        return preg_match(
-            '/^\d{4}-\d{2}-\d{2}$/',
-            trim($value)
-        ) === 1
-            && $this->isValidCalendarDate(
-                trim($value)
-            );
+        $val = trim($value);
+
+        if ($val === '') {
+            return false;
+        }
+
+        return (bool) strtotime($val);
     }
 
     /**
@@ -1472,27 +1248,5 @@ final class VisitorController
         }
 
         return (int) $parsed;
-    }
-
-    private function isValidCalendarDate(
-        string $date
-    ): bool {
-        $parts =
-            explode(
-                '-',
-                $date
-            );
-
-        if (
-            count($parts) !== 3
-        ) {
-            return false;
-        }
-
-        return checkdate(
-            (int) $parts[1],
-            (int) $parts[2],
-            (int) $parts[0]
-        );
     }
 }

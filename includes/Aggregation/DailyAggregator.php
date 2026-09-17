@@ -33,9 +33,9 @@ final class DailyAggregator
     ): void {
         $dateKey = trim($dateKey);
 
-        $this->validateDate(
-            $dateKey
-        );
+        if (!$this->isValidDate($dateKey)) {
+            return;
+        }
 
         $this->aggregateOverview(
             $dateKey
@@ -308,12 +308,7 @@ final class DailyAggregator
                 ]
             )
         ) {
-            throw new \InvalidArgumentException(
-                sprintf(
-                    'Unsupported session dimension: %s',
-                    $dimensionType
-                )
-            );
+            return;
         }
 
         $sessionsTable =
@@ -650,9 +645,9 @@ final class DailyAggregator
         );
     }
 
-    private function validateDate(
+    private function isValidDate(
         string $dateKey
-    ): void {
+    ): bool {
         $date =
             \DateTimeImmutable::createFromFormat(
                 '!Y-m-d',
@@ -662,28 +657,10 @@ final class DailyAggregator
                 )
             );
 
-        $errors =
-            \DateTimeImmutable::getLastErrors();
-
-        if (
-            $date === false
-            || (
-                is_array($errors)
-                && (
-                    $errors['warning_count'] > 0
-                    || $errors['error_count'] > 0
-                )
-            )
-            || $date->format(
-                'Y-m-d'
-            ) !== $dateKey
-        ) {
-            throw new \InvalidArgumentException(
-                sprintf(
-                    'Invalid aggregation date: %s',
-                    $dateKey
-                )
-            );
+        if ($date === false) {
+            return false;
         }
+
+        return $date->format('Y-m-d') === $dateKey;
     }
 }

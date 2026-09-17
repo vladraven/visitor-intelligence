@@ -51,6 +51,8 @@ final class ServerCollector
             return;
         }
 
+        $this->handled = true;
+
         if (
             !(bool) Config::get(
                 'enabled',
@@ -61,8 +63,6 @@ final class ServerCollector
                 true
             )
         ) {
-            $this->handled = true;
-
             return;
         }
 
@@ -73,14 +73,10 @@ final class ServerCollector
             )
             && $this->hasDoNotTrack()
         ) {
-            $this->handled = true;
-
             return;
         }
 
         if (!$this->isTrackableRequest()) {
-            $this->handled = true;
-
             return;
         }
 
@@ -92,11 +88,7 @@ final class ServerCollector
             $this->reportError(
                 $exception
             );
-
-            throw $exception;
         }
-
-        $this->handled = true;
     }
 
     /**
@@ -665,26 +657,22 @@ final class ServerCollector
 
     private function queriedPostId(): ?int
     {
-        $postId =
-            get_queried_object_id();
+        if (!function_exists('is_singular') || !is_singular()) {
+            return null;
+        }
+
+        $postId = get_queried_object_id();
 
         if (
-            !is_int(
-                $postId
-            )
-            && !is_numeric(
-                $postId
-            )
+            !is_int($postId)
+            && !is_numeric($postId)
         ) {
             return null;
         }
 
-        $postId =
-            (int) $postId;
+        $postId = (int) $postId;
 
-        return $postId > 0
-            ? $postId
-            : null;
+        return $postId > 0 ? $postId : null;
     }
 
     private function clientIp(): string

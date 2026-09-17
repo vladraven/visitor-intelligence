@@ -509,7 +509,7 @@ final class EventPipeline
         if (
             $state !== null
         ) {
-            $this->validateStateTimestamp(
+            $occurredAt = $this->sanitizeStateTimestamp(
                 $state['last_signal_at'],
                 $occurredAt
             );
@@ -601,7 +601,7 @@ final class EventPipeline
             ];
         }
 
-        $this->validateStateTimestamp(
+        $occurredAt = $this->sanitizeStateTimestamp(
             $state['last_signal_at'],
             $occurredAt
         );
@@ -614,9 +614,7 @@ final class EventPipeline
             && $activePageviewId !== null
             && $pageviewId !== $activePageviewId
         ) {
-            throw new \InvalidArgumentException(
-                'Heartbeat pageview does not match active pageview.'
-            );
+            $activePageviewId = $pageviewId;
         }
 
         if (
@@ -748,7 +746,7 @@ final class EventPipeline
             ];
         }
 
-        $this->validateStateTimestamp(
+        $occurredAt = $this->sanitizeStateTimestamp(
             $state['last_signal_at'],
             $occurredAt
         );
@@ -761,9 +759,7 @@ final class EventPipeline
             && $pageviewId !== null
             && $activePageviewId !== $pageviewId
         ) {
-            throw new \InvalidArgumentException(
-                'Activity stop pageview does not match active pageview.'
-            );
+            $activePageviewId = $pageviewId;
         }
 
         if (
@@ -1491,9 +1487,7 @@ final class EventPipeline
                 $occurredAt
             ) > 0
         ) {
-            throw new \InvalidArgumentException(
-                'Active state timestamp cannot move backwards.'
-            );
+            $occurredAt = $existing['last_signal_at'];
         }
 
         $result =
@@ -1550,9 +1544,7 @@ final class EventPipeline
         if (
             !is_string($raw)
         ) {
-            throw new \InvalidArgumentException(
-                'Event occurred_at is required.'
-            );
+            return gmdate('Y-m-d H:i:s');
         }
 
         $value =
@@ -1563,19 +1555,21 @@ final class EventPipeline
         if (
             $value === ''
         ) {
-            throw new \InvalidArgumentException(
-                'Event occurred_at is required.'
-            );
+            return gmdate('Y-m-d H:i:s');
         }
 
-        $date =
-            $this->createDateTime(
-                $value
-            );
+        try {
+            $date =
+                $this->createDateTime(
+                    $value
+                );
 
-        return $date->format(
-            'Y-m-d H:i:s'
-        );
+            return $date->format(
+                'Y-m-d H:i:s'
+            );
+        } catch (\Throwable) {
+            return gmdate('Y-m-d H:i:s');
+        }
     }
 
     private function normalizePageviewId(
@@ -1673,20 +1667,20 @@ final class EventPipeline
         return $value;
     }
 
-    private function validateStateTimestamp(
+    private function sanitizeStateTimestamp(
         string $previous,
         string $current
-    ): void {
+    ): string {
         if (
             $this->compareDateTimes(
                 $current,
                 $previous
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Event timestamp cannot move active state backwards.'
-            );
+            return $previous;
         }
+
+        return $current;
     }
 
     private function compareDateTimes(
@@ -1746,10 +1740,15 @@ final class EventPipeline
         string $value,
         string $label
     ): void {
+        $value =
+            trim(
+                $value
+            );
+
         if (
             preg_match(
                 '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-                trim($value)
+                $value
             ) !== 1
         ) {
             throw new \InvalidArgumentException(

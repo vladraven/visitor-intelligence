@@ -796,33 +796,40 @@ final class Plugin
                     return;
                 }
 
-                wp_enqueue_script(
-                    'vi-browser-collector',
-                    VI_URL
-                    . 'assets/browser-collector.js',
-                    [],
-                    VI_VERSION,
-                    true
-                );
+                try {
+                    $context =
+                        $this->container
+                            ->get(
+                                ServerCollector::class
+                            )
+                            ->getClientContext();
 
-                $context =
-                    $this->container
-                        ->get(
-                            ServerCollector::class
-                        )
-                        ->getClientContext();
+                    if (
+                        $context === null
+                    ) {
+                        return;
+                    }
 
-                if (
-                    $context === null
-                ) {
-                    return;
+                    wp_enqueue_script(
+                        'vi-browser-collector',
+                        VI_URL
+                        . 'assets/browser-collector.js',
+                        [],
+                        VI_VERSION,
+                        true
+                    );
+
+                    wp_localize_script(
+                        'vi-browser-collector',
+                        'viContext',
+                        $context
+                    );
+                } catch (\Throwable $exception) {
+                    $this->reportLifecycleError(
+                        'Browser collector setup failed.',
+                        $exception
+                    );
                 }
-
-                wp_localize_script(
-                    'vi-browser-collector',
-                    'viContext',
-                    $context
-                );
             },
             20
         );

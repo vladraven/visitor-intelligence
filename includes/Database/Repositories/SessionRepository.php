@@ -100,6 +100,15 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 $data
             );
 
+            if (
+                array_key_exists('landing_url', $update)
+                && trim(
+                    (string) ($existing['landing_url'] ?? '')
+                ) !== ''
+            ) {
+                unset($update['landing_url']);
+            }
+
             if ($update !== []) {
                 $this->validateUpdateData(
                     $update,
@@ -137,10 +146,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
 
             return $sessionId;
         } catch (\RuntimeException $exception) {
-            /*
-             * Only a concurrent insert of the same session may be
-             * converted into idempotent success.
-             */
             $existing = $this->findByIdentifier(
                 $sessionId
             );
@@ -315,9 +320,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 $startedAt
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Session activity cannot precede session start.'
-            );
+            $timestamp = $startedAt;
         }
 
         if (
@@ -326,9 +329,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 $currentLastActivity
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Session last_activity_at cannot move backwards.'
-            );
+            $timestamp = $currentLastActivity;
         }
 
         if (
@@ -338,9 +339,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 (string) $existing['ended_at']
             ) > 0
         ) {
-            throw new \InvalidArgumentException(
-                'Session activity cannot occur after session end.'
-            );
+            $timestamp = (string) $existing['ended_at'];
         }
 
         if (
@@ -407,9 +406,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 (string) $existing['ended_at']
             ) !== ''
         ) {
-            throw new \InvalidArgumentException(
-                'Cannot update duration of an ended session.'
-            );
+            return false;
         }
 
         $startedAt =
@@ -424,9 +421,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 $startedAt
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Session activity cannot precede session start.'
-            );
+            $lastActivityAt = $startedAt;
         }
 
         $currentLastActivity =
@@ -441,9 +436,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 $currentLastActivity
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Session last_activity_at cannot move backwards.'
-            );
+            $lastActivityAt = $currentLastActivity;
         }
 
         $currentDuration =
@@ -458,22 +451,12 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 ?? 0
             );
 
-        if (
-            $durationSeconds <
-            $currentDuration
-        ) {
-            throw new \InvalidArgumentException(
-                'Session duration cannot decrease.'
-            );
+        if ($durationSeconds < $currentDuration) {
+            $durationSeconds = $currentDuration;
         }
 
-        if (
-            $durationSeconds <
-            $currentActive
-        ) {
-            throw new \InvalidArgumentException(
-                'Session duration cannot be less than active seconds.'
-            );
+        if ($durationSeconds < $currentActive) {
+            $durationSeconds = $currentActive;
         }
 
         if (
@@ -545,9 +528,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 (string) $existing['ended_at']
             ) !== ''
         ) {
-            throw new \InvalidArgumentException(
-                'Cannot add active seconds to an ended session.'
-            );
+            return false;
         }
 
         $currentDuration =
@@ -562,14 +543,8 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 ?? 0
             );
 
-        if (
-            $currentActive + $seconds >
-            $currentDuration
-        ) {
-            throw new \InvalidArgumentException(
-                'Session active seconds cannot exceed session duration.'
-            );
-        }
+        $newActive = $currentActive + $seconds;
+        $newDuration = max($currentDuration, $newActive);
 
         $table = $this->table();
 
@@ -577,11 +552,12 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
             $this->database->execute(
                 "UPDATE {$table}
                  SET
-                     active_seconds =
-                         active_seconds + %d,
+                     active_seconds = active_seconds + %d,
+                     duration_seconds = GREATEST(duration_seconds, %d),
                      updated_at = %s
                  WHERE session_id = %s",
                 $seconds,
+                $newDuration,
                 $this->nowUtc(),
                 $sessionId
             );
@@ -618,15 +594,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
             'Session active seconds'
         );
 
-        if (
-            $activeSeconds >
-            $durationSeconds
-        ) {
-            throw new \InvalidArgumentException(
-                'Session active seconds cannot exceed session duration.'
-            );
-        }
-
         $existing = $this->findByIdentifier(
             $sessionId
         );
@@ -644,9 +611,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 $startedAt
             ) < 0
         ) {
-            throw new \InvalidArgumentException(
-                'Session cannot end before it starts.'
-            );
+            $endedAt = $startedAt;
         }
 
         $lastActivity =
@@ -661,9 +626,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 $endedAt
             ) > 0
         ) {
-            throw new \InvalidArgumentException(
-                'Session cannot end before its last activity.'
-            );
+            $endedAt = $lastActivity;
         }
 
         $currentDuration =
@@ -678,37 +641,11 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 ?? 0
             );
 
-        if (
-            $durationSeconds <
-            $currentDuration
-        ) {
-            throw new \InvalidArgumentException(
-                'Session duration cannot decrease.'
-            );
-        }
+        $durationSeconds = max($durationSeconds, $currentDuration);
+        $activeSeconds = max($activeSeconds, $currentActive);
 
-        if (
-            $activeSeconds <
-            $currentActive
-        ) {
-            throw new \InvalidArgumentException(
-                'Session active seconds cannot decrease.'
-            );
-        }
-
-        $currentEndedAt =
-            $existing['ended_at'] ?? null;
-
-        if (
-            $currentEndedAt !== null
-            && $this->compareDateTimes(
-                $endedAt,
-                (string) $currentEndedAt
-            ) < 0
-        ) {
-            throw new \InvalidArgumentException(
-                'Session ended_at cannot move backwards.'
-            );
+        if ($activeSeconds > $durationSeconds) {
+            $durationSeconds = $activeSeconds;
         }
 
         return $this->updateByIdentifier(
@@ -1509,9 +1446,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                     $current
                 ) < 0
             ) {
-                throw new \InvalidArgumentException(
-                    'Session last_activity_at cannot move backwards.'
-                );
+                $data['last_activity_at'] = $current;
             }
 
             if (
@@ -1520,9 +1455,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                     (string) $existing['started_at']
                 ) < 0
             ) {
-                throw new \InvalidArgumentException(
-                    'Session last_activity_at cannot precede session start.'
-                );
+                $data['last_activity_at'] = (string) $existing['started_at'];
             }
 
             if (
@@ -1532,9 +1465,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                     (string) $existing['ended_at']
                 ) > 0
             ) {
-                throw new \InvalidArgumentException(
-                    'Session activity cannot occur after session end.'
-                );
+                $data['last_activity_at'] = (string) $existing['ended_at'];
             }
         }
 
@@ -1562,38 +1493,7 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                     (string) $existing['started_at']
                 ) < 0
             ) {
-                throw new \InvalidArgumentException(
-                    'Session cannot end before it starts.'
-                );
-            }
-
-            if (
-                $existing['ended_at'] !== null
-                && $this->compareDateTimes(
-                    $endedAt,
-                    (string) $existing['ended_at']
-                ) < 0
-            ) {
-                throw new \InvalidArgumentException(
-                    'Session ended_at cannot move backwards.'
-                );
-            }
-
-            $lastActivity =
-                (string) (
-                    $existing['last_activity_at']
-                    ?? $existing['started_at']
-                );
-
-            if (
-                $this->compareDateTimes(
-                    $lastActivity,
-                    $endedAt
-                ) > 0
-            ) {
-                throw new \InvalidArgumentException(
-                    'Session cannot end before its last activity.'
-                );
+                $data['ended_at'] = (string) $existing['started_at'];
             }
         }
 
@@ -1616,107 +1516,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
             $this->validateNonNegativeInteger(
                 $data[$field],
                 $label
-            );
-
-            $current =
-                (int) (
-                    $existing[$field] ?? 0
-                );
-
-            if (
-                (int) $data[$field]
-                < $current
-            ) {
-                throw new \InvalidArgumentException(
-                    sprintf(
-                        '%s cannot decrease.',
-                        $label
-                    )
-                );
-            }
-        }
-
-        $effectiveDuration =
-            array_key_exists(
-                'duration_seconds',
-                $data
-            )
-                ? (int) $data['duration_seconds']
-                : (int) (
-                    $existing['duration_seconds']
-                    ?? 0
-                );
-
-        $effectiveActive =
-            array_key_exists(
-                'active_seconds',
-                $data
-            )
-                ? (int) $data['active_seconds']
-                : (int) (
-                    $existing['active_seconds']
-                    ?? 0
-                );
-
-        if (
-            $effectiveActive >
-            $effectiveDuration
-        ) {
-            throw new \InvalidArgumentException(
-                'Session active seconds cannot exceed session duration.'
-            );
-        }
-
-        foreach (
-            [
-                'landing_page_id' =>
-                    'Landing page ID',
-
-                'exit_page_id' =>
-                    'Exit page ID',
-            ] as $field => $label
-        ) {
-            if (
-                array_key_exists(
-                    $field,
-                    $data
-                )
-                && $data[$field] !== null
-            ) {
-                $this->validateNonNegativeInteger(
-                    $data[$field],
-                    $label
-                );
-            }
-        }
-
-        if (array_key_exists(
-            'landing_url',
-            $data
-        )) {
-            $this->validateImmutablePageValue(
-                $existing,
-                'landing_url',
-                'landing_page_id',
-                $data['landing_url'],
-                $data['landing_page_id']
-                    ?? null,
-                'Landing page'
-            );
-        }
-
-        if (array_key_exists(
-            'exit_url',
-            $data
-        )) {
-            $this->validateImmutablePageValue(
-                $existing,
-                'exit_url',
-                'exit_page_id',
-                $data['exit_url'],
-                $data['exit_page_id']
-                    ?? null,
-                'Exit page'
             );
         }
 
@@ -1761,21 +1560,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
             $this->validateTrackingMode(
                 $trackingMode
             );
-
-            $currentMode =
-                (string) (
-                    $existing['tracking_mode']
-                    ?? 'full'
-                );
-
-            if (
-                $currentMode === 'full'
-                && $trackingMode === 'server_only'
-            ) {
-                throw new \InvalidArgumentException(
-                    'Session tracking mode cannot downgrade from full to server_only.'
-                );
-            }
         }
 
         if (array_key_exists(
@@ -1856,59 +1640,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
     }
 
     /**
-     * @param array<string, mixed> $existing
-     */
-    private function validateImmutablePageValue(
-        array $existing,
-        string $urlField,
-        string $pageField,
-        mixed $url,
-        mixed $pageId,
-        string $label
-    ): void {
-        $newUrl = trim(
-            (string) $url
-        );
-
-        $currentUrl =
-            trim(
-                (string) (
-                    $existing[$urlField]
-                    ?? ''
-                )
-            );
-
-        if (
-            $currentUrl !== ''
-            && $currentUrl !== $newUrl
-        ) {
-            throw new \InvalidArgumentException(
-                sprintf(
-                    '%s URL cannot change once established.',
-                    $label
-                )
-            );
-        }
-
-        $currentPageId =
-            $existing[$pageField] ?? null;
-
-        if (
-            $currentPageId !== null
-            && $pageId !== null
-            && (int) $currentPageId
-                !== (int) $pageId
-        ) {
-            throw new \InvalidArgumentException(
-                sprintf(
-                    '%s page ID cannot change once established.',
-                    $label
-                )
-            );
-        }
-    }
-
-    /**
      * @param array<string, mixed> $record
      */
     private function validateRecord(
@@ -1932,47 +1663,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
             (string) $record['last_activity_at']
         );
 
-        if (
-            $this->compareDateTimes(
-                (string) $record['last_activity_at'],
-                (string) $record['started_at']
-            ) < 0
-        ) {
-            throw new \InvalidArgumentException(
-                'Last activity cannot precede session start.'
-            );
-        }
-
-        if (
-            $record['ended_at'] !== null
-        ) {
-            $this->validateDateTime(
-                (string) $record['ended_at']
-            );
-
-            if (
-                $this->compareDateTimes(
-                    (string) $record['ended_at'],
-                    (string) $record['started_at']
-                ) < 0
-            ) {
-                throw new \InvalidArgumentException(
-                    'Session cannot end before it starts.'
-                );
-            }
-
-            if (
-                $this->compareDateTimes(
-                    (string) $record['last_activity_at'],
-                    (string) $record['ended_at']
-                ) > 0
-            ) {
-                throw new \InvalidArgumentException(
-                    'Last activity cannot occur after session end.'
-                );
-            }
-        }
-
         $this->validateNonNegativeInteger(
             $record['duration_seconds'],
             'Session duration'
@@ -1983,49 +1673,11 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
             'Session active seconds'
         );
 
-        if (
-            (int) $record['active_seconds'] >
-            (int) $record['duration_seconds']
-        ) {
-            throw new \InvalidArgumentException(
-                'Session active seconds cannot exceed session duration.'
-            );
-        }
-
-        if (
-            $record['landing_page_id'] !== null
-        ) {
-            $this->validateNonNegativeInteger(
-                $record['landing_page_id'],
-                'Landing page ID'
-            );
-        }
-
-        if (
-            $record['exit_page_id'] !== null
-        ) {
-            $this->validateNonNegativeInteger(
-                $record['exit_page_id'],
-                'Exit page ID'
-            );
-        }
-
         if (!is_string(
             $record['landing_url']
         )) {
             throw new \InvalidArgumentException(
                 'Session landing URL must be a string.'
-            );
-        }
-
-        if (
-            $record['exit_url'] !== null
-            && !is_string(
-                $record['exit_url']
-            )
-        ) {
-            throw new \InvalidArgumentException(
-                'Session exit URL must be a string or null.'
             );
         }
 
@@ -2141,11 +1793,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
                 ? 'landing_page_id'
                 : 'exit_page_id';
 
-        $label =
-            $landing
-                ? 'Landing page'
-                : 'Exit page';
-
         $existing = $this->findByIdentifier(
             $sessionId
         );
@@ -2163,15 +1810,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
             );
 
         if ($currentUrl !== '') {
-            $this->validateImmutablePageValue(
-                $existing,
-                $urlField,
-                $pageField,
-                $url,
-                $pageId,
-                $label
-            );
-
             return true;
         }
 
@@ -2544,9 +2182,6 @@ final class SessionRepository extends AbstractRepository implements SessionRepos
 
     protected function nowUtc(): string
     {
-        return current_time(
-            'mysql',
-            true
-        );
+        return gmdate('Y-m-d H:i:s');
     }
 }
